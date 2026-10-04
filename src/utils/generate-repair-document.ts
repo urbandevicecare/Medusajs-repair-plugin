@@ -109,6 +109,25 @@ const formatDate = (dateString: string | Date) => {
   return `${d.getDate().toString().padStart(2, "0")}/${(d.getMonth() + 1).toString().padStart(2, "0")}/${d.getFullYear()}`;
 };
 
+
+async function getOrGenerateShortUrl(url: string, repairService: any, storeUrl: string): Promise<string> {
+  if (!url) return url;
+  try {
+    const existing = await repairService.listRepairLinks({ url });
+    if (existing && existing.length > 0) {
+      return `${storeUrl}/r/${existing[0].shortcode}`;
+    }
+    const shortcode = Math.random().toString(36).substring(2, 8);
+    await repairService.createRepairLinks({
+      shortcode,
+      url,
+    });
+    return `${storeUrl}/r/${shortcode}`;
+  } catch (e) {
+    return url;
+  }
+}
+
 export async function generateRepairDocument(
   docType: string,
   ticket: any,
@@ -149,6 +168,17 @@ export async function generateRepairDocument(
       
       // 2. Generate Estimate or Invoice or Receipt
       const metadata = ticket.metadata || {};
+
+      const targetTotal = (ticket.total_actual && ticket.total_actual > 0) ? ticket.total_actual : ticket.total_estimate;
+      const balanceDue = Math.max(0, targetTotal - (ticket.amount_paid || 0));
+      if (balanceDue > 0 && ticket.approval_token && (docType === "invoice" || docType === "quote")) {
+          let sUrl = process.env.STORE_URL || "http://localhost:3000";
+          if (settings?.storefront_url) sUrl = settings.storefront_url;
+          sUrl = sUrl.replace(/\/$/, "");
+          const lUrl = `${sUrl}/repairs/track?token=${ticket.approval_token}`;
+          const shortL = await getOrGenerateShortUrl(lUrl, repairService, sUrl);
+          ticket._paymentLinkText = `Pay Online: ${shortL}`;
+      }
 
       if (docType === "quote") {
         let estId = metadata.zoho_estimate_id as string;
@@ -491,11 +521,26 @@ export async function generateRepairDocument(
   const pageHeight = doc.page.height;
   const footerY = pageHeight - 90;
   
+  let paymentLinkText = "";
+  if (docType === "invoice" || docType === "quote") {
+      const targetTotal = (ticket.total_actual && ticket.total_actual > 0) ? ticket.total_actual : ticket.total_estimate;
+      const balanceDue = Math.max(0, targetTotal - (ticket.amount_paid || 0));
+      if (balanceDue > 0 && ticket.approval_token) {
+          let storeUrl = process.env.STORE_URL || "http://localhost:3000";
+          if (settings?.storefront_url) storeUrl = settings.storefront_url;
+          storeUrl = storeUrl.replace(/\/$/, "");
+          
+          const longUrl = `${storeUrl}/repairs/track?token=${ticket.approval_token}`;
+          const shortUrl = await getOrGenerateShortUrl(longUrl, repairService, storeUrl);
+          paymentLinkText = `Pay Online: ${shortUrl} | `;
+      }
+  }
+  
   doc.fontSize(9).font("Helvetica-Bold").fillColor("#333");
   if (settings?.pdf_payment_details && docType !== "receipt") {
-      doc.text(settings.pdf_payment_details.replace(/\n/g, ' | '), 50, footerY, { width: 495 });
+      doc.text(paymentLinkText + settings.pdf_payment_details.replace(/\n/g, ' | '), 50, footerY, { width: 495 });
   } else if (docType !== "receipt") {
-      doc.text("Thanks for your business. | Paybill: 880100 - Acc No: PAYURBANDEVICE", 50, footerY);
+      doc.text(paymentLinkText + "Thanks for your business. | Paybill: 880100 - Acc No: PAYURBANDEVICE", 50, footerY);
   } else {
       doc.text("Thanks for your business.", 50, footerY);
   }
