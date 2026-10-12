@@ -135,112 +135,140 @@ export async function generateRepairDocument(
   res: MedusaResponse,
   req: MedusaRequest,
 ) {
-  // 1. Delegate financial documents to medusajs-documents-plugin if registered
-  if (docType !== "job_card") {
-    try {
-      const documentService: any = req.scope.resolve("documents", {
-        allowUnregistered: true,
-      });
-      if (documentService) {
-        const mappedType =
-          docType === "quote"
+  // 1. Delegate documents (including job_card, quote, invoice, receipt) to medusajs-documents-plugin if registered
+  try {
+    const documentService: any = req.scope.resolve("documents", {
+      allowUnregistered: true,
+    });
+    if (documentService) {
+      const mappedType =
+        docType === "job_card"
+          ? "job_card"
+          : docType === "quote"
             ? "estimate"
             : docType === "receipt"
               ? "receipt"
               : "invoice";
 
-        let customerEmail: string | undefined;
-        let customerPhone: string | undefined;
-        if (ticket.customer_id) {
-          try {
-            const customerModule = req.scope.resolve("customer", { allowUnregistered: true });
-            if (customerModule) {
-              const c = await customerModule.retrieveCustomer(ticket.customer_id);
-              if (c) {
-                customerEmail = c.email || undefined;
-                customerPhone = c.phone || undefined;
-              }
+      const docTitle =
+        docType === "job_card"
+          ? "Repair Job Card"
+          : docType === "receipt"
+            ? "Repair Payment Receipt"
+            : docType === "quote"
+              ? "Repair Estimate / Quote"
+              : "Repair Invoice";
+
+      const displayId =
+        docType === "job_card"
+          ? `JOB-${ticket.ticket_number}`
+          : `RT-${ticket.ticket_number}`;
+
+      let customerEmail: string | undefined;
+      let customerPhone: string | undefined;
+      if (ticket.customer_id) {
+        try {
+          const customerModule = req.scope.resolve("customer", { allowUnregistered: true });
+          if (customerModule) {
+            const c = await customerModule.retrieveCustomer(ticket.customer_id);
+            if (c) {
+              customerEmail = c.email || undefined;
+              customerPhone = c.phone || undefined;
             }
-          } catch (e) {}
-        }
-
-        const items: any[] = [];
-        if (ticket.device?.parts_used && ticket.device.parts_used.length > 0) {
-          for (const part of ticket.device.parts_used) {
-            items.push({
-              title: part.name || "Replacement Part",
-              description: part.sku ? `SKU: ${part.sku}` : "",
-              quantity: 1,
-              unit_price: Number(part.price || 0),
-              total: Number(part.price || 0),
-            });
           }
-        }
-        if (Number(ticket.labor_estimate || 0) > 0) {
+        } catch (e) {}
+      }
+
+      const items: any[] = [];
+      if (ticket.device?.parts_used && ticket.device.parts_used.length > 0) {
+        for (const part of ticket.device.parts_used) {
           items.push({
-            title: "Labor Charge",
+            title: part.name || "Replacement Part",
+            description: part.sku ? `SKU: ${part.sku}` : "",
             quantity: 1,
-            unit_price: Number(ticket.labor_estimate),
-            total: Number(ticket.labor_estimate),
+            unit_price: Number(part.price || 0),
+            total: Number(part.price || 0),
           });
-        }
-        if (ticket.custom_parts && ticket.custom_parts.length > 0) {
-          for (const cp of ticket.custom_parts) {
-            items.push({
-              title: cp.name || "Custom Part / Service",
-              quantity: 1,
-              unit_price: Number(cp.price || 0),
-              total: Number(cp.price || 0),
-            });
-          }
-        }
-        if (items.length === 0) {
-          const tot = Number(ticket.total_actual || ticket.total_estimate || 0);
-          items.push({
-            title: `Repair Service (#${ticket.ticket_number})`,
-            quantity: 1,
-            unit_price: tot,
-            total: tot,
-          });
-        }
-
-        const totalAmt = Number(ticket.total_actual && ticket.total_actual > 0 ? ticket.total_actual : ticket.total_estimate || 0);
-        const isPaid = ticket.payment_status === "captured" || ticket.payment_status === "paid" || docType === "receipt";
-
-        const { pdfBuffer, record } = await documentService.generateDocument(
-          {
-            display_id: `RT-${ticket.ticket_number}`,
-            title: docType === "receipt" ? "Repair Payment Receipt" : docType === "quote" ? "Repair Estimate / Quote" : "Repair Invoice",
-            type: mappedType,
-            repair_ticket_id: ticket.id,
-            customer: {
-              name: customerName || "Customer",
-              email: customerEmail,
-              phone: customerPhone,
-            },
-            items,
-            total: totalAmt,
-            currency_code: "usd",
-            payment_status: isPaid ? "paid" : "unpaid",
-            auto_send: false,
-          },
-          req.scope,
-        );
-
-        if (pdfBuffer) {
-          res.setHeader("Content-Type", "application/pdf");
-          res.setHeader(
-            "Content-Disposition",
-            `inline; filename="${mappedType}-${record?.display_id || ticket.ticket_number}.pdf"`,
-          );
-          return res.send(pdfBuffer);
         }
       }
-    } catch (err: any) {
-      req.scope
-        .resolve("logger")
-        ?.warn?.(`[generateRepairDocument] Documents plugin delegation fallback: ${err.message}`);
+      if (Number(ticket.labor_estimate || 0) > 0) {
+        items.push({
+          title: "Labor Charge",
+          quantity: 1,
+          unit_price: Number(ticket.labor_estimate),
+          total: Number(ticket.labor_estimate),
+        });
+      }
+      if (ticket.custom_parts && ticket.custom_parts.length > 0) {
+        for (const cp of ticket.custom_parts) {
+          items.push({
+            title: cp.name || "Custom Part / Service",
+            quantity: 1,
+            unit_price: Number(cp.price || 0),
+            total: Number(cp.price || 0),
+          });
+        }
+      }
+      if (items.length === 0) {
+        const tot = Number(ticket.total_actual || ticket.total_estimate || 0);
+        items.push({
+          title: `Repair Service (#${ticket.ticket_number})`,
+          quantity: 1,
+          unit_price: tot,
+          total: tot,
+        });
+      }
+
+      const totalAmt = Number(ticket.total_actual && ticket.total_actual > 0 ? ticket.total_actual : ticket.total_estimate || 0);
+      const isPaid = ticket.payment_status === "captured" || ticket.payment_status === "paid" || docType === "receipt";
+
+      let storeUrl = process.env.STORE_URL || "http://localhost:3000";
+      const trackingUrl = ticket.approval_token ? `${storeUrl.replace(/\/$/, "")}/repairs/track?token=${ticket.approval_token}` : undefined;
+
+      const { pdfBuffer, record } = await documentService.generateDocument(
+        {
+          display_id: displayId,
+          title: docTitle,
+          type: mappedType,
+          repair_ticket_id: ticket.id,
+          customer: {
+            name: customerName || "Customer",
+            email: customerEmail,
+            phone: customerPhone,
+          },
+          items,
+          total: totalAmt,
+          currency_code: "usd",
+          payment_status: isPaid ? "paid" : "unpaid",
+          payment_link: docType === "job_card" ? trackingUrl : undefined,
+          auto_send: false,
+          notes: ticket.terms_accepted != null ? `Intake Consent: Terms Accepted = ${ticket.terms_accepted ? "Yes" : "No"}, Data Wipe Consent = ${ticket.data_wiped_consent ? "Yes" : "No"}` : undefined,
+          custom_fields: {
+            "Device Model": ticket.device?.model_name || "N/A",
+            "Brand": ticket.device?.brand || "N/A",
+            "Serial / IMEI": ticket.device?.serial_number || ticket.device?.imei || "N/A",
+            "Condition": ticket.device?.condition || "Not specified",
+            "Accessories": ticket.accessories || "None",
+            "Technician": ticket.technician_name || "Unassigned",
+            "Issue": ticket.issue_description || "Standard Repair",
+          },
+        },
+        req.scope,
+      );
+
+      if (pdfBuffer) {
+        res.setHeader("Content-Type", "application/pdf");
+        res.setHeader(
+          "Content-Disposition",
+          `inline; filename="${mappedType}-${record?.display_id || ticket.ticket_number}.pdf"`,
+        );
+        return res.send(pdfBuffer);
+      }
     }
+  } catch (err: any) {
+    req.scope
+      .resolve("logger")
+      ?.warn?.(`[generateRepairDocument] Documents plugin delegation fallback: ${err.message}`);
   }
 
   // 2. Local fallback if documents plugin is not active
