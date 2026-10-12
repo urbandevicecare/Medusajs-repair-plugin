@@ -135,40 +135,112 @@ export async function generateRepairDocument(
   res: MedusaResponse,
   req: MedusaRequest,
 ) {
-  // 1. Delegate to medusajs-documents-plugin if registered
-  try {
-    const documentService: any = req.scope.resolve("documents", {
-      allowUnregistered: true,
-    });
-    if (documentService) {
-      const mappedType =
-        docType === "job_card"
-          ? "job_card"
-          : docType === "quote"
+  // 1. Delegate financial documents to medusajs-documents-plugin if registered
+  if (docType !== "job_card") {
+    try {
+      const documentService: any = req.scope.resolve("documents", {
+        allowUnregistered: true,
+      });
+      if (documentService) {
+        const mappedType =
+          docType === "quote"
             ? "estimate"
             : docType === "receipt"
               ? "receipt"
               : "invoice";
 
-      const { pdfBuffer, record } = await documentService.generateDocument(
-        {
-          repair_ticket_id: ticket.id,
-          type: mappedType,
-        },
-        req.scope,
-      );
+        let customerEmail: string | undefined;
+        let customerPhone: string | undefined;
+        if (ticket.customer_id) {
+          try {
+            const customerModule = req.scope.resolve("customer", { allowUnregistered: true });
+            if (customerModule) {
+              const c = await customerModule.retrieveCustomer(ticket.customer_id);
+              if (c) {
+                customerEmail = c.email || undefined;
+                customerPhone = c.phone || undefined;
+              }
+            }
+          } catch (e) {}
+        }
 
-      res.setHeader("Content-Type", "application/pdf");
-      res.setHeader(
-        "Content-Disposition",
-        `inline; filename="${mappedType}-${record?.display_id || ticket.ticket_number}.pdf"`,
-      );
-      return res.send(pdfBuffer);
+        const items: any[] = [];
+        if (ticket.device?.parts_used && ticket.device.parts_used.length > 0) {
+          for (const part of ticket.device.parts_used) {
+            items.push({
+              title: part.name || "Replacement Part",
+              description: part.sku ? `SKU: ${part.sku}` : "",
+              quantity: 1,
+              unit_price: Number(part.price || 0),
+              total: Number(part.price || 0),
+            });
+          }
+        }
+        if (Number(ticket.labor_estimate || 0) > 0) {
+          items.push({
+            title: "Labor Charge",
+            quantity: 1,
+            unit_price: Number(ticket.labor_estimate),
+            total: Number(ticket.labor_estimate),
+          });
+        }
+        if (ticket.custom_parts && ticket.custom_parts.length > 0) {
+          for (const cp of ticket.custom_parts) {
+            items.push({
+              title: cp.name || "Custom Part / Service",
+              quantity: 1,
+              unit_price: Number(cp.price || 0),
+              total: Number(cp.price || 0),
+            });
+          }
+        }
+        if (items.length === 0) {
+          const tot = Number(ticket.total_actual || ticket.total_estimate || 0);
+          items.push({
+            title: `Repair Service (#${ticket.ticket_number})`,
+            quantity: 1,
+            unit_price: tot,
+            total: tot,
+          });
+        }
+
+        const totalAmt = Number(ticket.total_actual && ticket.total_actual > 0 ? ticket.total_actual : ticket.total_estimate || 0);
+        const isPaid = ticket.payment_status === "captured" || ticket.payment_status === "paid" || docType === "receipt";
+
+        const { pdfBuffer, record } = await documentService.generateDocument(
+          {
+            display_id: `RT-${ticket.ticket_number}`,
+            title: docType === "receipt" ? "Repair Payment Receipt" : docType === "quote" ? "Repair Estimate / Quote" : "Repair Invoice",
+            type: mappedType,
+            repair_ticket_id: ticket.id,
+            customer: {
+              name: customerName || "Customer",
+              email: customerEmail,
+              phone: customerPhone,
+            },
+            items,
+            total: totalAmt,
+            currency_code: "usd",
+            payment_status: isPaid ? "paid" : "unpaid",
+            auto_send: false,
+          },
+          req.scope,
+        );
+
+        if (pdfBuffer) {
+          res.setHeader("Content-Type", "application/pdf");
+          res.setHeader(
+            "Content-Disposition",
+            `inline; filename="${mappedType}-${record?.display_id || ticket.ticket_number}.pdf"`,
+          );
+          return res.send(pdfBuffer);
+        }
+      }
+    } catch (err: any) {
+      req.scope
+        .resolve("logger")
+        ?.warn?.(`[generateRepairDocument] Documents plugin delegation fallback: ${err.message}`);
     }
-  } catch (err: any) {
-    req.scope
-      .resolve("logger")
-      ?.warn?.(`[generateRepairDocument] Documents plugin delegation fallback: ${err.message}`);
   }
 
   // 2. Local fallback if documents plugin is not active
