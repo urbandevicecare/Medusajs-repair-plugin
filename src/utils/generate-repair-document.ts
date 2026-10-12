@@ -135,6 +135,43 @@ export async function generateRepairDocument(
   res: MedusaResponse,
   req: MedusaRequest,
 ) {
+  // 1. Delegate to medusajs-documents-plugin if registered
+  try {
+    const documentService: any = req.scope.resolve("documents", {
+      allowUnregistered: true,
+    });
+    if (documentService) {
+      const mappedType =
+        docType === "job_card"
+          ? "job_card"
+          : docType === "quote"
+            ? "estimate"
+            : docType === "receipt"
+              ? "receipt"
+              : "invoice";
+
+      const { pdfBuffer, record } = await documentService.generateDocument(
+        {
+          repair_ticket_id: ticket.id,
+          type: mappedType,
+        },
+        req.scope,
+      );
+
+      res.setHeader("Content-Type", "application/pdf");
+      res.setHeader(
+        "Content-Disposition",
+        `inline; filename="${mappedType}-${record?.display_id || ticket.ticket_number}.pdf"`,
+      );
+      return res.send(pdfBuffer);
+    }
+  } catch (err: any) {
+    req.scope
+      .resolve("logger")
+      ?.warn?.(`[generateRepairDocument] Documents plugin delegation fallback: ${err.message}`);
+  }
+
+  // 2. Local fallback if documents plugin is not active
   const repairService: RepairModuleService = req.scope.resolve(REPAIR_MODULE);
   const [settings] = await repairService.listRepairSettings({});
   let zohoError = "";

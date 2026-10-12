@@ -78,10 +78,34 @@ export default async function handleOrderPaid({
     }
   }
 
-  // Push Payment to Zoho Books if enabled
-  const { syncPaymentToZoho } = await import("../utils/zoho-payment-sync.js");
   const amount = order.total || ticket.total_actual || ticket.total_estimate;
-  await syncPaymentToZoho(container, ticket.id, amount as number, "PaymentCollection");
+
+  // 1. Emit repair.payment_received event so medusajs-documents-plugin handles receipt & Zoho sync
+  try {
+    const eventBus = container.resolve(Modules.EVENT_BUS, { allowUnregistered: true });
+    if (eventBus) {
+      await eventBus.emit({
+        name: "repair.payment_received",
+        data: {
+          id: ticket.id,
+          repair_ticket_id: ticket.id,
+          amount,
+          order_id: order.id,
+        },
+      });
+    }
+  } catch (e) {
+    container.resolve("logger")?.warn?.(`[handleOrderPaid] Failed to emit repair.payment_received: ${e}`);
+  }
+
+  // 2. Fallback: Push Payment to Zoho Books only if medusajs-documents-plugin is NOT active
+  try {
+    const docModule = container.resolve("documents", { allowUnregistered: true });
+    if (!docModule) {
+      const { syncPaymentToZoho } = await import("../utils/zoho-payment-sync.js");
+      await syncPaymentToZoho(container, ticket.id, amount as number, "PaymentCollection");
+    }
+  } catch (e) {}
 }
 
 export const config: SubscriberConfig = {

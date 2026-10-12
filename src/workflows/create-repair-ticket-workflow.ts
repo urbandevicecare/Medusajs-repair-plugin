@@ -5,6 +5,7 @@ import {
 import { createDeviceStep } from "./steps/create-device";
 import { createRepairTicketStep } from "./steps/create-repair-ticket";
 import { emitComplianceRequestedEventStep } from "./steps/emit-compliance-requested-event";
+import { emitRepairCreatedEventStep } from "./steps/emit-repair-created-event";
 
 type CreateRepairTicketWorkflowInput = {
   device: {
@@ -38,6 +39,10 @@ export const createRepairTicketWorkflow = createWorkflow(
       accessories: input.ticket.accessories,
       terms_accepted: input.ticket.terms_accepted,
       data_wiped_consent: input.ticket.data_wiped_consent,
+    });
+
+    emitRepairCreatedEventStep({
+      ticket_id: repairTicket.id,
     });
 
     emitComplianceRequestedEventStep({
