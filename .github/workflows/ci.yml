@@ -32,11 +32,10 @@ jobs:
           git config --global user.email "github-actions[bot]@://github.com"
 
       # 3. Bump version (patch), commit, and tag
-      # Use [skip ci] in the message to prevent an infinite loop
       - name: Bump Version
         id: bump_version
         run: |
-          npm version patch -m "chore: bump version to %s [skip ci]"
+          npm version patch -m "chore: bump version to %s"
           echo "VERSION=$(node -p "require('./package.json').version")" >> $GITHUB_ENV
 
       # 4. Push the new version and tag back to GitHub

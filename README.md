@@ -145,6 +145,13 @@ To verify the system's integrations (such as price formatting, Zoho Books tax ha
 
 ## Changelog
 
+### v0.1.98
+- **PDF Layout Polish**: Added company contact details (address, phone, email, website) directly below the logo on PDF documents. Cleaned up the "Bill To" section by removing redundant Customer ID numbers, and suppressed internal Zoho sync error messages from customer-facing PDFs.
+- **Short URL Redirection Fix**: Resolved a 500 error on `/r/[code]` shortlink redirects by properly querying and returning redirects.
+- **Zoho Books Invoice Parity**: Removed explicit invoice/estimate number overrides that conflicted with Zoho's auto-generated numbering settings, seamlessly mapping repair ticket numbers to `reference_number` instead.
+- **Document Payment Links**: Injected short payment links directly into invoice payment details and Zoho Books notes with partial payment support.
+- **CI / CD Publishing**: Updated version bump workflow to ensure continuous integration and npm publishing run without skipping.
+
 ### v0.1.86
 - **Storefront URL Shortlinks**: Updated the native URL shortener to construct short links using the `storefront_url` setting instead of the backend API URL, ensuring customers receive fully branded links (e.g., `https://urbandevicecare.co.uk/r/Xy29P`).
 
