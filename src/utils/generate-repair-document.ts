@@ -8,109 +8,22 @@ import { REPAIR_MODULE } from "../modules/repair";
 import RepairModuleService from "../modules/repair/service";
 import { ZohoBooksService } from "../services/zoho-books.js";
 
-// Helpers
-const formatCurrency = (amount: number) => {
+// Format helpers
+export const formatCurrency = (amount: number) => {
   return new Intl.NumberFormat("en-US", {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   }).format(amount);
 };
 
-const postProcessZohoPdf = async (pdfBuffer: Buffer, ticket: any, docType: string): Promise<Buffer> => {
-  try {
-    const pdfDoc = await PDFLibDoc.load(pdfBuffer);
-    
-    // 1. Generate & Embed QR Code Safely
-    let qrImage: any = null;
-    try {
-      const qrUrl = `${process.env.STORE_URL || "http://localhost:3000"}/store/repairs/track?number=${ticket.ticket_number}`;
-      const qrBufferLib = await QRCode.toBuffer(qrUrl, {
-        errorCorrectionLevel: "H",
-        type: "png",
-        margin: 1,
-        width: 70,
-      });
-      qrImage = await pdfDoc.embedPng(qrBufferLib);
-    } catch (qrErr) {
-      console.error("[postProcessZohoPdf] QR Code generation skipped due to error:", qrErr);
-    }
-    
-    // 2. Determine Watermark
-    let watermarkText = "";
-    let watermarkColor = rgb(0.8, 0.8, 0.8);
-    const isPaid = ticket.payment_status === "captured" || ticket.payment_status === "paid" || docType === "receipt";
-    
-    if (docType === "invoice" || docType === "receipt") {
-      watermarkText = isPaid ? "PAID" : "UNPAID";
-      watermarkColor = isPaid ? rgb(0.13, 0.77, 0.36) : rgb(0.93, 0.26, 0.26); // green vs red
-    } else if (docType === "quote") {
-      watermarkText = "QUOTATION";
-      watermarkColor = rgb(0.8, 0.8, 0.8);
-    }
-    
-    // Override if cancelled
-    if (ticket.status === "cancelled") {
-      watermarkText = "CANCELLED";
-      watermarkColor = rgb(0.93, 0.26, 0.26);
-    }
-    
-    const helveticaFont = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
-    const pages = pdfDoc.getPages();
-    
-    if (pages.length > 0) {
-      const firstPage = pages[0];
-      
-      // Draw QR Code
-      if (qrImage) {
-        firstPage.drawImage(qrImage, {
-          x: firstPage.getWidth() - 110,
-          y: 40,
-          width: 70,
-          height: 70,
-        });
-      }
-      
-      // Draw Watermark
-      if (watermarkText) {
-        firstPage.drawText(watermarkText, {
-          x: firstPage.getWidth() / 2 - 120,
-          y: firstPage.getHeight() / 2 - 120,
-          size: 80,
-          font: helveticaFont,
-          color: watermarkColor,
-          opacity: 0.15,
-          rotate: degrees(45),
-        });
-      }
-    }
-    
-    // Obscure "Powered by Zoho Books" at the bottom of all pages
-    for (const page of pages) {
-      page.drawRectangle({
-        x: 0,
-        y: 0,
-        width: page.getWidth(),
-        height: 35,
-        color: rgb(1, 1, 1),
-      });
-    }
-
-    const modifiedPdfBytes = await pdfDoc.save();
-    return Buffer.from(modifiedPdfBytes);
-  } catch (e: any) {
-    console.error("[postProcessZohoPdf] CRITICAL Error processing PDF:", e?.message || e);
-    return pdfBuffer; // fallback to original
-  }
-};
-
-const formatDate = (dateString: string | Date) => {
-  if (!dateString) return "";
+export const formatDate = (dateString?: string | Date) => {
+  if (!dateString) return new Date().toLocaleDateString("en-GB");
   const d = new Date(dateString);
+  if (isNaN(d.getTime())) return new Date().toLocaleDateString("en-GB");
   return `${d.getDate().toString().padStart(2, "0")}/${(d.getMonth() + 1).toString().padStart(2, "0")}/${d.getFullYear()}`;
 };
 
-
-async function getOrGenerateShortUrl(url: string, repairService: any, storeUrl: string): Promise<string> {
+export async function getOrGenerateShortUrl(url: string, repairService: any, storeUrl: string): Promise<string> {
   if (!url) return url;
   try {
     const existing = await repairService.listRepairLinks({ url });
@@ -128,59 +41,806 @@ async function getOrGenerateShortUrl(url: string, repairService: any, storeUrl: 
   }
 }
 
-export async function generateRepairDocument(
+export const postProcessZohoPdf = async (pdfBuffer: Buffer, ticket: any, docType: string): Promise<Buffer> => {
+  try {
+    const pdfDoc = await PDFLibDoc.load(pdfBuffer);
+    
+    // 1. Generate & Embed QR Code Safely
+    let qrImage: any = null;
+    try {
+      const qrUrl = `${process.env.STORE_URL || "http://localhost:3000"}/store/repairs/track?number=${ticket.ticket_number}`;
+      const qrBufferLib = await QRCode.toBuffer(qrUrl, {
+        errorCorrectionLevel: "H",
+        type: "png",
+        margin: 1,
+        width: 70,
+      });
+      qrImage = await pdfDoc.embedPng(qrBufferLib);
+    } catch (qrErr) {
+      console.error("[postProcessZohoPdf] QR Code generation skipped:", qrErr);
+    }
+    
+    // 2. Determine Watermark
+    let watermarkText = "";
+    let watermarkColor = rgb(0.8, 0.8, 0.8);
+    const isPaid = ticket.payment_status === "captured" || ticket.payment_status === "paid" || docType === "receipt";
+    
+    if (docType === "invoice" || docType === "receipt") {
+      watermarkText = isPaid ? "PAID" : "UNPAID";
+      watermarkColor = isPaid ? rgb(0.13, 0.77, 0.36) : rgb(0.93, 0.26, 0.26);
+    } else if (docType === "quote" || docType === "estimate") {
+      watermarkText = "QUOTATION";
+      watermarkColor = rgb(0.8, 0.8, 0.8);
+    }
+    
+    if (ticket.status === "cancelled") {
+      watermarkText = "CANCELLED";
+      watermarkColor = rgb(0.93, 0.26, 0.26);
+    }
+    
+    const helveticaFont = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
+    const pages = pdfDoc.getPages();
+    
+    if (pages.length > 0) {
+      const firstPage = pages[0];
+      if (qrImage) {
+        firstPage.drawImage(qrImage, {
+          x: firstPage.getWidth() - 110,
+          y: 40,
+          width: 70,
+          height: 70,
+        });
+      }
+      
+      if (watermarkText) {
+        firstPage.drawText(watermarkText, {
+          x: firstPage.getWidth() / 2 - 120,
+          y: firstPage.getHeight() / 2 - 120,
+          size: 80,
+          font: helveticaFont,
+          color: watermarkColor,
+          opacity: 0.15,
+          rotate: degrees(45),
+        });
+      }
+    }
+    
+    for (const page of pages) {
+      page.drawRectangle({
+        x: 0,
+        y: 0,
+        width: page.getWidth(),
+        height: 35,
+        color: rgb(1, 1, 1),
+      });
+    }
+
+    const modifiedPdfBytes = await pdfDoc.save();
+    return Buffer.from(modifiedPdfBytes);
+  } catch (e: any) {
+    console.error("[postProcessZohoPdf] Error processing PDF:", e?.message || e);
+    return pdfBuffer;
+  }
+};
+
+// Helper to resolve logo buffer
+async function resolveLogoBuffer(logoUrl?: string | null): Promise<Buffer | null> {
+  if (logoUrl) {
+    try {
+      if (logoUrl.startsWith("http://") || logoUrl.startsWith("https://")) {
+        const res = await fetch(logoUrl);
+        if (res.ok) {
+          const ab = await res.arrayBuffer();
+          return Buffer.from(ab);
+        }
+      } else if (fs.existsSync(logoUrl)) {
+        return fs.readFileSync(logoUrl);
+      }
+    } catch (e) {}
+  }
+  const defaultLogo = path.resolve(process.cwd(), "src/utils/assets/logo.png");
+  if (fs.existsSync(defaultLogo)) {
+    try {
+      return fs.readFileSync(defaultLogo);
+    } catch (e) {}
+  }
+  return null;
+}
+
+// ---------------------------------------------------------------------------------
+// CONSISTENT COMPANY HEADER DRAWING HELPER
+// ---------------------------------------------------------------------------------
+function drawConsistentHeader(
+  doc: PDFKit.PDFDocument,
+  logoBuffer: Buffer | null,
+  settings: any,
+  titleConfig: {
+    title: string;
+    subtitle?: string;
+    docNumber?: string;
+    dateLabel?: string;
+    dateValue?: string;
+    badgeText?: string;
+    badgeColor?: string;
+    amountLabel?: string;
+    amountValue?: string;
+    amountColor?: string;
+  }
+): number {
+  const leftX = 45;
+  const rightX = 330;
+  const rightW = 220;
+  let topY = 40;
+
+  // 1. Logo or Brand Name on Top-Left
+  if (logoBuffer) {
+    try {
+      doc.image(logoBuffer, leftX, topY, { fit: [140, 50] });
+    } catch (e) {
+      doc.fontSize(16).font("Helvetica-Bold").fillColor("#111827").text(settings?.company_name || "URBAN DEVICE CARE LTD", leftX, topY);
+    }
+  } else {
+    doc.fontSize(16).font("Helvetica-Bold").fillColor("#111827").text(settings?.company_name || "URBAN DEVICE CARE LTD", leftX, topY);
+  }
+
+  // 2. Company Details below Logo
+  let detailsY = topY + 54;
+  doc.fontSize(8.5).font("Helvetica-Bold").fillColor("#111827").text((settings?.company_name || "Urban Device Care Ltd").toUpperCase(), leftX, detailsY);
+  detailsY += 12;
+
+  doc.fontSize(8).font("Helvetica").fillColor("#4b5563");
+  const address = settings?.pdf_address || "Bekim House, Westlands Crossway Road\nNairobi 00800, Kenya";
+  doc.text(address, leftX, detailsY, { width: 230 });
+  detailsY += doc.heightOfString(address, { width: 230 }) + 2;
+
+  const phone = settings?.pdf_phone || "0729436660 / 0794700241";
+  doc.text(`Tel: ${phone}`, leftX, detailsY);
+  detailsY += 11;
+
+  const email = settings?.pdf_email || "info@urbandevicecare.co.uk";
+  doc.text(`Email: ${email}`, leftX, detailsY);
+  detailsY += 11;
+
+  if (settings?.pdf_website) {
+    doc.text(`Web: ${settings.pdf_website}`, leftX, detailsY);
+    detailsY += 11;
+  }
+
+  const kraPin = settings?.kra_pin || "P052534849N";
+  doc.font("Helvetica-Bold").fillColor("#111827").text(`KRA PIN: ${kraPin}`, leftX, detailsY);
+  detailsY += 14;
+
+  // 3. Right Header Block (Document title, number, date, badges)
+  let rightY = topY;
+  if (titleConfig.subtitle) {
+    doc.fontSize(10).font("Helvetica-Bold").fillColor("#6b7280").text(titleConfig.subtitle, rightX, rightY, { width: rightW, align: "right" });
+    rightY += 13;
+  }
+
+  const titleFontSize = titleConfig.title.length > 15 ? 16 : 20;
+  doc.fontSize(titleFontSize).font("Helvetica-Bold").fillColor("#111827");
+  const titleHeight = doc.heightOfString(titleConfig.title, { width: rightW });
+  doc.text(titleConfig.title, rightX, rightY, { width: rightW, align: "right" });
+  rightY += titleHeight + 4;
+
+  if (titleConfig.docNumber) {
+    doc.fontSize(9).font("Helvetica-Bold").fillColor("#374151").text(titleConfig.docNumber, rightX, rightY, { width: rightW, align: "right" });
+    rightY += 13;
+  }
+
+  if (titleConfig.badgeText) {
+    doc.fontSize(10).font("Helvetica-Bold").fillColor(titleConfig.badgeColor || "#dc2626").text(titleConfig.badgeText, rightX, rightY, { width: rightW, align: "right" });
+    rightY += 14;
+  }
+
+  if (titleConfig.amountLabel && titleConfig.amountValue) {
+    doc.fontSize(8.5).font("Helvetica").fillColor("#6b7280").text(titleConfig.amountLabel, rightX, rightY, { width: rightW, align: "right" });
+    rightY += 11;
+    doc.fontSize(13.5).font("Helvetica-Bold").fillColor(titleConfig.amountColor || "#111827").text(titleConfig.amountValue, rightX, rightY, { width: rightW, align: "right" });
+    rightY += 18;
+  }
+
+  if (titleConfig.dateLabel && titleConfig.dateValue) {
+    doc.fontSize(8.5).font("Helvetica").fillColor("#4b5563").text(`${titleConfig.dateLabel}:  ${titleConfig.dateValue}`, rightX, rightY, { width: rightW, align: "right" });
+    rightY += 13;
+  }
+
+  return Math.max(detailsY, rightY) + 10;
+}
+
+// ---------------------------------------------------------------------------------
+// 1. ZOHO-EXACT LAYOUT (INVOICE, QUOTE / ESTIMATE, RECEIPT)
+// ---------------------------------------------------------------------------------
+function renderZohoExactDocument(
+  doc: PDFKit.PDFDocument,
   docType: string,
   ticket: any,
   customerName: string,
-  res: MedusaResponse,
-  req: MedusaRequest,
+  settings: any,
+  items: any[],
+  totals: { totalEstimate: number; amountPaid: number; balanceDue: number },
+  logoBuffer: Buffer | null,
+  qrBuffer: Buffer | null,
+  paymentLinkText: string
 ) {
-  // 1. Delegate documents (including job_card, quote, invoice, receipt) to medusajs-documents-plugin if registered
-  try {
-    const documentService: any = req.scope.resolve("documents", {
-      allowUnregistered: true,
-    });
-    if (documentService) {
-      const mappedType =
-        docType === "job_card"
-          ? "job_card"
-          : docType === "quote"
-            ? "estimate"
-            : docType === "receipt"
-              ? "receipt"
-              : "invoice";
+  const isInvoice = docType === "invoice";
+  const isReceipt = docType === "receipt";
+  const isPaid = ticket.payment_status === "captured" || ticket.payment_status === "paid" || ticket.status === "completed" || isReceipt;
 
-      const docTitle =
-        docType === "job_card"
-          ? "Repair Job Card"
-          : docType === "receipt"
-            ? "Repair Payment Receipt"
-            : docType === "quote"
-              ? "Repair Estimate / Quote"
-              : "Repair Invoice";
+  const title = isReceipt ? "PAYMENT RECEIPT" : isInvoice ? "INVOICE" : "ESTIMATE";
+  const docNumber = isReceipt ? `REC-RT-${ticket.ticket_number}` : isInvoice ? `RT-RT-${ticket.ticket_number}` : `RT-${ticket.ticket_number}`;
+  const badgeText = isReceipt ? "PAID" : isInvoice ? (isPaid ? "PAID" : "UNPAID") : undefined;
+  const badgeColor = isPaid ? "#16a34a" : "#dc2626";
 
-      const displayId =
-        docType === "job_card"
-          ? `JOB-${ticket.ticket_number}`
-          : `RT-${ticket.ticket_number}`;
+  const amountLabel = isReceipt ? "Amount Paid" : isInvoice ? "Balance Due" : "Estimated Total";
+  const amountValue = `KES ${formatCurrency(isReceipt ? totals.amountPaid : totals.balanceDue)}`;
 
-      let customerEmail: string | undefined;
-      let customerPhone: string | undefined;
-      if (ticket.customer_id) {
-        try {
-          const customerModule = req.scope.resolve("customer", { allowUnregistered: true });
-          if (customerModule) {
-            const c = await customerModule.retrieveCustomer(ticket.customer_id);
-            if (c) {
-              customerEmail = c.email || undefined;
-              customerPhone = c.phone || undefined;
-            }
-          }
-        } catch (e) {}
-      }
+  const nextY = drawConsistentHeader(doc, logoBuffer, settings, {
+    title,
+    docNumber,
+    badgeText,
+    badgeColor,
+    amountLabel,
+    amountValue,
+    amountColor: isReceipt ? "#16a34a" : "#111827",
+  });
 
+  // Thin separator
+  let currentY = nextY;
+  doc.rect(45, currentY, 505, 1).fill("#e5e7eb");
+  currentY += 12;
+
+  // Bill To & Meta Data
+  const metaY = currentY;
+  doc.fontSize(8).font("Helvetica-Bold").fillColor("#9ca3af").text(isReceipt ? "PAID BY" : "BILL TO", 45, metaY);
+  doc.fontSize(10).font("Helvetica-Bold").fillColor("#111827").text(customerName || "Customer", 45, metaY + 11);
+
+  let cY = metaY + 24;
+  doc.fontSize(8.5).font("Helvetica").fillColor("#4b5563");
+  if (ticket.customer?.email) { doc.text(ticket.customer.email, 45, cY); cY += 11; }
+  if (ticket.customer?.phone) { doc.text(ticket.customer.phone, 45, cY); cY += 11; }
+
+  // Right Meta
+  const rightMetaX = 330;
+  const rightMetaW = 220;
+  let rmY = metaY;
+
+  const addMetaRow = (label: string, value: string) => {
+    doc.fontSize(8.5).font("Helvetica").fillColor("#6b7280").text(label, rightMetaX, rmY, { width: 90, align: "left" });
+    doc.fontSize(8.5).font("Helvetica-Bold").fillColor("#111827").text(value, rightMetaX + 90, rmY, { width: rightMetaW - 90, align: "right" });
+    rmY += 14;
+  };
+
+  addMetaRow("Job Card No :", `RT-${ticket.ticket_number}`);
+  addMetaRow(isReceipt ? "Payment Date :" : isInvoice ? "Invoice Date :" : "Estimate Date :", formatDate(ticket.created_at));
+  addMetaRow("Terms :", isReceipt ? "Paid in Full" : isInvoice ? "Due on Receipt" : "Valid for 14 Days");
+
+  currentY = Math.max(cY, rmY) + 16;
+
+  // Table Header
+  doc.rect(45, currentY, 505, 20).fill("#374151");
+  doc.fillColor("#ffffff").font("Helvetica-Bold").fontSize(8.5);
+  doc.text("#", 50, currentY + 5, { width: 25 });
+  doc.text("Description", 78, currentY + 5, { width: 255 });
+  doc.text("Qty", 335, currentY + 5, { width: 35, align: "center" });
+  doc.text("Rate", 375, currentY + 5, { width: 70, align: "right" });
+  doc.text("Amount", 455, currentY + 5, { width: 90, align: "right" });
+
+  currentY += 26;
+
+  // Items
+  doc.fillColor("#111827").font("Helvetica").fontSize(8.5);
+  let idx = 1;
+  for (const item of items) {
+    if (currentY > doc.page.height - 130) {
+      doc.addPage();
+      currentY = 45;
+    }
+
+    doc.font("Helvetica").fillColor("#6b7280").text(idx.toString(), 50, currentY, { width: 25 });
+    doc.font("Helvetica-Bold").fillColor("#111827").text(item.title, 78, currentY, { width: 255 });
+    const titleH = doc.heightOfString(item.title, { width: 255 });
+    
+    let descH = 0;
+    if (item.description) {
+      doc.font("Helvetica").fillColor("#6b7280").fontSize(7.5).text(item.description, 78, currentY + titleH + 2, { width: 255 });
+      descH = doc.heightOfString(item.description, { width: 255 }) + 2;
+    }
+
+    doc.font("Helvetica").fillColor("#111827").fontSize(8.5);
+    doc.text(Number(item.quantity || 1).toFixed(2), 335, currentY, { width: 35, align: "center" });
+    doc.text(formatCurrency(Number(item.unit_price || 0)), 375, currentY, { width: 70, align: "right" });
+    doc.text(formatCurrency(Number(item.total || item.unit_price || 0)), 455, currentY, { width: 90, align: "right" });
+
+    currentY += Math.max(16, titleH + descH + 4);
+    doc.rect(45, currentY - 3, 505, 0.5).fill("#f3f4f6");
+    idx++;
+  }
+
+  currentY += 8;
+
+  // Summary Table
+  const sumW = 220;
+  const sumX = 330;
+
+  const addSummaryRow = (label: string, value: string, isBold: boolean = false, isBg: boolean = false, valColor: string = "#111827") => {
+    if (isBg) {
+      doc.rect(sumX - 10, currentY - 3, sumW + 10, 20).fill("#f3f4f6");
+    }
+    doc.font(isBold ? "Helvetica-Bold" : "Helvetica").fillColor("#4b5563").fontSize(8.5);
+    doc.text(label, sumX, currentY + 1, { width: 100, align: "left" });
+    doc.font(isBold ? "Helvetica-Bold" : "Helvetica").fillColor(valColor).text(value, sumX + 100, currentY + 1, { width: sumW - 100, align: "right" });
+    currentY += 18;
+  };
+
+  addSummaryRow("Sub Total", formatCurrency(totals.totalEstimate));
+  addSummaryRow("Total", `KES ${formatCurrency(totals.totalEstimate)}`, true);
+  if (isInvoice || isReceipt) {
+    addSummaryRow("Payment Made", `(-) ${formatCurrency(totals.amountPaid)}`, false, false, totals.amountPaid > 0 ? "#16a34a" : "#6b7280");
+    addSummaryRow("Balance Due", `KES ${formatCurrency(totals.balanceDue)}`, true, true, "#111827");
+  }
+
+  // Terms and conditions
+  if (settings?.pdf_terms) {
+    currentY += 16;
+    if (currentY > doc.page.height - 110) { doc.addPage(); currentY = 45; }
+    doc.fontSize(8.5).font("Helvetica-Bold").fillColor("#111827").text("Terms & Conditions", 45, currentY);
+    currentY += 11;
+    doc.fontSize(7.5).font("Helvetica").fillColor("#6b7280").text(settings.pdf_terms, 45, currentY, { width: 505 });
+  }
+
+  // Watermark
+  let watermarkText = "";
+  let watermarkColor = "#e5e7eb";
+  if (ticket.status === "cancelled") {
+    watermarkText = "CANCELLED";
+    watermarkColor = "#fca5a5";
+  } else if (isInvoice || isReceipt) {
+    watermarkText = isPaid ? "PAID" : "UNPAID";
+    watermarkColor = isPaid ? "#86efac" : "#fca5a5";
+  } else {
+    watermarkText = "QUOTATION";
+    watermarkColor = "#e5e7eb";
+  }
+
+  if (watermarkText) {
+    doc.save()
+       .translate(doc.page.width / 2, doc.page.height / 2)
+       .rotate(-45, { origin: [0, 0] })
+       .fontSize(90)
+       .font("Helvetica-Bold")
+       .fillColor(watermarkColor)
+       .fillOpacity(0.18)
+       .text(watermarkText, -250, -45, { align: "center", width: 500 })
+       .restore();
+  }
+
+  // Footer
+  doc.page.margins.bottom = 0;
+  const footerY = doc.page.height - 65;
+  doc.fontSize(8).font("Helvetica-Bold").fillColor("#374151");
+  const payInstructions = settings?.pdf_payment_details
+    ? settings.pdf_payment_details.replace(/\n/g, " | ")
+    : "Thanks for your business. | Paybill: 880100 - Acc No: PAYURBANDEVICE";
+  doc.text(`${paymentLinkText}${payInstructions}`, 45, footerY, { width: 440, lineBreak: false });
+
+  if (qrBuffer) {
+    try {
+      doc.image(qrBuffer, 490, footerY - 15, { width: 55 });
+    } catch (e) {}
+  }
+
+  doc.rect(45, footerY + 20, 505, 0.5).fill("#d1d5db");
+  doc.fontSize(7.5).font("Helvetica").fillColor("#9ca3af");
+  doc.text(`POWERED BY ${(settings?.company_name || "URBAN DEVICE CARE LTD").toUpperCase()}`, 45, footerY + 26, { lineBreak: false });
+  doc.text("1", 540, footerY + 26, { align: "right", lineBreak: false });
+}
+
+// ---------------------------------------------------------------------------------
+// 2. REPAIR JOB CARD LAYOUT (WORKSHOP INTAKE & ASSET DETAILS)
+// ---------------------------------------------------------------------------------
+function renderJobCardDocument(
+  doc: PDFKit.PDFDocument,
+  ticket: any,
+  customerName: string,
+  settings: any,
+  items: any[],
+  totals: { totalEstimate: number; amountPaid: number; balanceDue: number },
+  logoBuffer: Buffer | null,
+  qrBuffer: Buffer | null
+) {
+  const nextY = drawConsistentHeader(doc, logoBuffer, settings, {
+    title: "JOB CARD",
+    subtitle: "Service & Repair Details",
+    docNumber: `NO: JC-${ticket.ticket_number}`,
+    dateLabel: "Date",
+    dateValue: formatDate(ticket.created_at),
+  });
+
+  let currentY = nextY;
+  doc.rect(45, currentY, 505, 1).fill("#e2e8f0");
+  currentY += 15;
+
+  // SECTION 1: CLIENT & ASSET DETAILS
+  doc.fontSize(9.5).font("Helvetica-Bold").fillColor("#0f172a").text("CLIENT & ASSET DETAILS", 45, currentY);
+  currentY += 14;
+
+  const col1X = 45;
+  const col2X = 300;
+  const boxTop = currentY;
+
+  // Left Column
+  let leftY = boxTop;
+  const drawField = (label: string, value: string, xPos: number, yPos: number, isRight: boolean = false) => {
+    doc.fontSize(8.5).font("Helvetica-Bold").fillColor("#334155").text(`${label}:`, xPos, yPos);
+    doc.font("Helvetica").fillColor("#0f172a").text(value || "N/A", xPos + (isRight ? 95 : 85), yPos, { width: isRight ? 150 : 160 });
+  };
+
+  drawField("Client Name", customerName, col1X, leftY); leftY += 15;
+  drawField("Phone", ticket.customer?.phone || "N/A", col1X, leftY); leftY += 15;
+  drawField("Email", ticket.customer?.email || "N/A", col1X, leftY); leftY += 15;
+
+  // Right Column
+  let rightY = boxTop;
+  const brandModel = `${ticket.device?.brand || ""} ${ticket.device?.model_name || "General Device"}`.trim();
+  drawField("Item / Asset", brandModel, col2X, rightY, true); rightY += 15;
+  drawField("Serial/Model", ticket.device?.serial_number || ticket.device?.imei || "N/A", col2X, rightY, true); rightY += 15;
+  drawField("Status", String(ticket.status || "In Progress").replace(/_/g, " ").toUpperCase(), col2X, rightY, true); rightY += 15;
+  drawField("Accessories", ticket.accessories || "None", col2X, rightY, true); rightY += 15;
+
+  currentY = Math.max(leftY, rightY) + 12;
+
+  // SECTION 2: JOB DESCRIPTION & DIAGNOSTICS
+  doc.rect(45, currentY, 505, 0.5).fill("#e2e8f0");
+  currentY += 10;
+  doc.fontSize(9.5).font("Helvetica-Bold").fillColor("#0f172a").text("JOB DESCRIPTION & DIAGNOSTICS", 45, currentY);
+  currentY += 14;
+
+  doc.fontSize(8.5).font("Helvetica-Bold").fillColor("#334155").text("Reported Issue:", 45, currentY);
+  doc.font("Helvetica").fillColor("#0f172a").text(ticket.issue_description || "Customer reported hardware failure / service required.", 140, currentY, { width: 410 });
+  currentY += doc.heightOfString(ticket.issue_description || "Customer reported hardware failure.", { width: 410 }) + 8;
+
+  if (ticket.device?.condition) {
+    doc.fontSize(8.5).font("Helvetica-Bold").fillColor("#334155").text("Intake Condition:", 45, currentY);
+    doc.font("Helvetica").fillColor("#0f172a").text(ticket.device.condition, 140, currentY, { width: 410 });
+    currentY += doc.heightOfString(ticket.device.condition, { width: 410 }) + 10;
+  }
+
+  // SECTION 3: SERVICE WORK & PARTS
+  doc.rect(45, currentY, 505, 0.5).fill("#e2e8f0");
+  currentY += 10;
+  doc.fontSize(9.5).font("Helvetica-Bold").fillColor("#0f172a").text("SERVICE WORK & PARTS", 45, currentY);
+  currentY += 14;
+
+  // Table header with borders matching sample
+  doc.rect(45, currentY, 505, 1.5).fill("#334155");
+  currentY += 4;
+  doc.fillColor("#0f172a").font("Helvetica-Bold").fontSize(8.5);
+  doc.text("Task / Part Description", 48, currentY, { width: 250 });
+  doc.text("Qty", 325, currentY, { width: 35, align: "center" });
+  doc.text("Unit Cost", 375, currentY, { width: 75, align: "right" });
+  doc.text("Total", 460, currentY, { width: 85, align: "right" });
+  currentY += 14;
+  doc.rect(45, currentY, 505, 0.5).fill("#94a3b8");
+  currentY += 6;
+
+  for (const item of items) {
+    if (currentY > doc.page.height - 120) {
+      doc.addPage();
+      currentY = 50;
+    }
+
+    doc.font("Helvetica").fillColor("#0f172a").fontSize(8.5);
+    doc.text(item.title, 48, currentY, { width: 250 });
+    doc.text(Number(item.quantity || 1).toString(), 325, currentY, { width: 35, align: "center" });
+    doc.text(`KSh ${formatCurrency(Number(item.unit_price || 0))}`, 375, currentY, { width: 75, align: "right" });
+    doc.text(`KSh ${formatCurrency(Number(item.total || item.unit_price || 0))}`, 460, currentY, { width: 85, align: "right" });
+    const titleH = doc.heightOfString(item.title, { width: 250 });
+    const rowH = Math.max(16, titleH + 4);
+    currentY += rowH;
+    doc.rect(45, currentY - 3, 505, 0.5).fill("#f1f5f9");
+  }
+
+  // Total Row
+  currentY += 6;
+  doc.font("Helvetica-Bold").fontSize(9).fillColor("#0f172a");
+  doc.text("Est. Total:", 375, currentY, { width: 75, align: "right" });
+  doc.text(`KSh ${formatCurrency(totals.totalEstimate)}`, 460, currentY, { width: 85, align: "right" });
+  currentY += 28;
+
+  // SECTION 4: DUAL SIGNATURES
+  if (currentY > doc.page.height - 120) { doc.addPage(); currentY = 50; }
+  const sigY = currentY + 30;
+  doc.rect(45, sigY, 200, 0.75).fill("#0f172a");
+  doc.rect(310, sigY, 200, 0.75).fill("#0f172a");
+
+  doc.fontSize(8.5).font("Helvetica-Bold").fillColor("#0f172a");
+  doc.text("Technician Signature", 45, sigY + 5);
+  doc.text("Customer Signature", 310, sigY + 5);
+
+  doc.page.margins.bottom = 0;
+  const footerY = doc.page.height - 45;
+  doc.fontSize(7.5).font("Helvetica").fillColor("#94a3b8");
+  doc.text("Intake Agreement: Diagnostics & component repairs carry standard 90-day warranty coverage. Customer accepts custody release terms.", 45, footerY, { width: 440, lineBreak: false });
+  if (qrBuffer) {
+    try { doc.image(qrBuffer, 495, footerY - 12, { width: 45 }); } catch (e) {}
+  }
+}
+
+// ---------------------------------------------------------------------------------
+// 3. SERVICE & DIAGNOSTIC REPORT LAYOUT (MATCHING SAMPLES)
+// ---------------------------------------------------------------------------------
+function renderServiceReportDocument(
+  doc: PDFKit.PDFDocument,
+  ticket: any,
+  customerName: string,
+  settings: any,
+  items: any[],
+  totals: { totalEstimate: number; amountPaid: number; balanceDue: number },
+  logoBuffer: Buffer | null
+) {
+  const nextY = drawConsistentHeader(doc, logoBuffer, settings, {
+    subtitle: "SERVICE &",
+    title: "DIAGNOSTIC REPORT",
+    dateLabel: "Report Date",
+    dateValue: formatDate(ticket.created_at),
+    docNumber: `Reference:  #SRV-${ticket.ticket_number}`,
+  });
+
+  let currentY = nextY;
+
+  // Target Device / Client Box (grey box with thick dark vertical border)
+  doc.rect(45, currentY, 505, 40).fill("#f8fafc");
+  doc.rect(45, currentY, 3.5, 40).fill("#1e293b");
+
+  const brandModel = `${ticket.device?.brand || ""} ${ticket.device?.model_name || "General Device"}`.trim();
+  doc.fontSize(9.5).font("Helvetica-Bold").fillColor("#0f172a").text(customerName ? `${customerName} — Hardware Diagnostic Proposal` : "Device Diagnostic Proposal", 55, currentY + 7);
+  doc.fontSize(8.5).font("Helvetica").fillColor("#475569").text(`Model: ${brandModel}  •  Serial Number: ${ticket.device?.serial_number || "N/A"}  •  Status: ${String(ticket.status || "Diagnosed").replace(/_/g, " ").toUpperCase()}`, 55, currentY + 22);
+
+  currentY += 50;
+
+  // Table with dark navy/charcoal header
+  doc.rect(45, currentY, 505, 20).fill("#1e293b");
+  doc.fillColor("#ffffff").font("Helvetica-Bold").fontSize(8);
+  doc.text("QTY", 48, currentY + 6, { width: 30, align: "center" });
+  doc.text("SERVICE / ITEM", 85, currentY + 6, { width: 145 });
+  doc.text("SCOPE & SPECIFICATIONS", 235, currentY + 6, { width: 195 });
+  doc.text("AMOUNT (KES)", 435, currentY + 6, { width: 110, align: "right" });
+
+  currentY += 25;
+
+  for (const item of items) {
+    if (currentY > doc.page.height - 180) { doc.addPage(); currentY = 45; }
+
+    doc.font("Helvetica").fillColor("#0f172a").fontSize(8.5);
+    doc.text(Number(item.quantity || 1).toString(), 48, currentY, { width: 30, align: "center" });
+
+    doc.font("Helvetica-Bold").text(item.title, 85, currentY, { width: 145 });
+    const titleHeight = doc.heightOfString(item.title, { width: 145 });
+
+    const specText = item.description || "Full OEM disassembly, component replacement, thermal validation, adhesive resealing, and stress testing.";
+    doc.font("Helvetica").fillColor("#475569").fontSize(7.5).text(specText, 235, currentY, { width: 195 });
+    const specHeight = doc.heightOfString(specText, { width: 195 });
+
+    doc.font("Helvetica").fillColor("#0f172a").fontSize(8.5).text(formatCurrency(Number(item.total || item.unit_price || 0)), 435, currentY, { width: 110, align: "right" });
+
+    const rowHeight = Math.max(18, titleHeight + 8, specHeight + 8);
+    currentY += rowHeight;
+    doc.rect(45, currentY - 3, 505, 0.5).fill("#e2e8f0");
+  }
+
+  // Total Estimated Cost Box
+  doc.rect(45, currentY + 2, 505, 20).fill("#f8fafc");
+  doc.font("Helvetica-Bold").fontSize(9).fillColor("#0f172a");
+  doc.text("Total Estimated Cost:", 300, currentY + 7, { width: 120, align: "right" });
+  doc.text(formatCurrency(totals.totalEstimate), 435, currentY + 7, { width: 110, align: "right" });
+
+  currentY += 34;
+
+  // DIAGNOSTICS & TECHNICAL SUMMARY CARD
+  if (currentY > doc.page.height - 160) { doc.addPage(); currentY = 45; }
+  const diagCardY = currentY;
+  const diagH = 75;
+  doc.rect(45, diagCardY, 505, diagH).fill("#f8fafc");
+  doc.rect(45, diagCardY, 3.5, diagH).fill("#1e3a8a");
+
+  doc.fontSize(8.5).font("Helvetica-Bold").fillColor("#1e3a8a").text("DIAGNOSTICS & TECHNICAL SUMMARY", 55, diagCardY + 8);
+  
+  let bY = diagCardY + 22;
+  const drawBullet = (titleText: string, bodyText: string) => {
+    doc.fontSize(7.5).font("Helvetica-Bold").fillColor("#0f172a").text(`• ${titleText}: `, 55, bY, { continued: true });
+    doc.font("Helvetica").fillColor("#475569").text(bodyText, { width: 480 });
+    bY += 16;
+  };
+
+  drawBullet("Hardware Assessment", ticket.issue_description || "Inspection confirmed hardware malfunction requiring bench service.");
+  drawBullet("Bench & Component Measurements", "Thermal dissipation profile, logic rail voltages, and sub-assembly continuity verified.");
+  drawBullet("Clearance Plan", "Component replacement and workshop clean-room installation under 90-day warranty.");
+
+  currentY += diagH + 12;
+
+  // LONG-TERM INFRASTRUCTURE RECOMMENDATION CARD
+  if (currentY > doc.page.height - 120) { doc.addPage(); currentY = 45; }
+  const recCardY = currentY;
+  const recH = 65;
+  doc.rect(45, recCardY, 505, recH).fill("#f0f7ff");
+  doc.rect(45, recCardY, 3.5, recH).fill("#2563eb");
+
+  doc.fontSize(8.5).font("Helvetica-Bold").fillColor("#2563eb").text("LONG-TERM INFRASTRUCTURE RECOMMENDATION", 55, recCardY + 8);
+  const recText = "While scheduled maintenance and OEM component replacement restores peak stability and operational hygiene, older hardware architectures face natural component obsolescence. We recommend periodic thermal de-dusting and evaluating phased upgrades to Apple Silicon or modern platforms.";
+  doc.fontSize(7.5).font("Helvetica").fillColor("#1e293b").text(recText, 55, recCardY + 22, { width: 485, lineGap: 2 });
+
+  currentY += recH + 14;
+
+  doc.page.margins.bottom = 0;
+  const footerY = doc.page.height - 40;
+  doc.fontSize(7.5).font("Helvetica").fillColor("#94a3b8");
+  doc.text(`Official Diagnostic & Scope Report — ${(settings?.company_name || "Urban Device Care Ltd")}`, 45, footerY, { lineBreak: false });
+  doc.text("Page 1 of 1", 500, footerY, { align: "right", lineBreak: false });
+}
+
+// ---------------------------------------------------------------------------------
+// 4. IT ASSET HANDOVER & INSPECTION REPORT LAYOUT (MATCHING SAMPLES)
+// ---------------------------------------------------------------------------------
+function renderHandoverReportDocument(
+  doc: PDFKit.PDFDocument,
+  ticket: any,
+  customerName: string,
+  settings: any,
+  logoBuffer: Buffer | null
+) {
+  const leftX = 45;
+  const topY = 40;
+
+  // Logo on Left
+  if (logoBuffer) {
+    try { doc.image(logoBuffer, leftX, topY, { fit: [140, 48] }); } catch (e) {}
+  } else {
+    doc.fontSize(16).font("Helvetica-Bold").fillColor("#111827").text(settings?.company_name || "URBAN DEVICE CARE LTD", leftX, topY);
+  }
+
+  // Company on Right
+  const rightX = 320;
+  let rY = topY;
+  doc.fontSize(8).font("Helvetica-Bold").fillColor("#0f172a").text(settings?.company_name || "Urban Device Care Ltd", rightX, rY, { width: 230, align: "right" });
+  rY += 10;
+  doc.font("Helvetica").fontSize(7.5).fillColor("#64748b");
+  doc.text(settings?.pdf_address || "Bekim House, Westlands Crossway Road, Nairobi 00800, Kenya", rightX, rY, { width: 230, align: "right" });
+  rY += doc.heightOfString(settings?.pdf_address || "Bekim House", { width: 230 }) + 2;
+  doc.text(`Tel: ${settings?.pdf_phone || "0729436660 / 0794700241"}`, rightX, rY, { width: 230, align: "right" });
+  rY += 9;
+  doc.text(`Email: ${settings?.pdf_email || "info@urbandevicecare.co.uk"}`, rightX, rY, { width: 230, align: "right" });
+  rY += 9;
+  doc.font("Helvetica-Bold").text(`KRA PIN: ${settings?.kra_pin || "P052534849N"}`, rightX, rY, { width: 230, align: "right" });
+
+  let currentY = Math.max(topY + 54, rY + 14);
+  doc.rect(45, currentY, 505, 1.5).fill("#0f172a");
+  currentY += 12;
+
+  // Centered Header Banner Box
+  doc.rect(45, currentY, 505, 24).fill("#f1f5f9");
+  doc.fontSize(11).font("Helvetica-Bold").fillColor("#0f172a").text("IT ASSET HANDOVER & INSPECTION REPORT", 45, currentY + 7, { width: 505, align: "center", characterSpacing: 0.5 });
+  currentY += 34;
+
+  // Metadata: To, Subject, Date
+  const drawMeta = (lbl: string, val: string) => {
+    doc.fontSize(8.5).font("Helvetica-Bold").fillColor("#0f172a").text(lbl, 45, currentY, { width: 60 });
+    doc.font("Helvetica").fillColor("#334155").text(val, 110, currentY, { width: 440 });
+    currentY += 13;
+  };
+
+  drawMeta("To:", customerName || "Company Administration / IT Department");
+  drawMeta("Subject:", "End-of-Service / Custody Release Clearance");
+  drawMeta("Date:", formatDate(ticket.created_at));
+  currentY += 10;
+
+  // 1. DEVICE INFORMATION (2x2 Cards Grid)
+  doc.fontSize(9.5).font("Helvetica-Bold").fillColor("#0f172a").text("1. DEVICE INFORMATION", 45, currentY);
+  currentY += 14;
+
+  const cardW = 247;
+  const cardH = 38;
+  const cardRow1Y = currentY;
+  const cardRow2Y = currentY + cardH + 8;
+  const col2CardX = 45 + cardW + 11;
+
+  const drawCard = (x: number, y: number, label: string, val: string) => {
+    doc.roundedRect(x, y, cardW, cardH, 4).fillAndStroke("#f8fafc", "#e2e8f0");
+    doc.fontSize(7.5).font("Helvetica-Bold").fillColor("#64748b").text(label, x + 10, y + 6);
+    doc.fontSize(8.5).font("Helvetica").fillColor("#0f172a").text(val || "N/A", x + 10, y + 19, { width: cardW - 20, ellipsis: true });
+  };
+
+  const brandModel = `${ticket.device?.brand || ""} ${ticket.device?.model_name || "General Device"}`.trim();
+  drawCard(45, cardRow1Y, "MODEL", brandModel);
+  drawCard(col2CardX, cardRow1Y, "SERIAL NUMBER (SN)", ticket.device?.serial_number || ticket.device?.imei || "N/A");
+  drawCard(45, cardRow2Y, "ACCESSORIES", ticket.accessories || "Standard power adapter and accessories");
+  drawCard(col2CardX, cardRow2Y, "STORAGE & CONDITION", ticket.device?.condition || "Inspected & fully functional");
+
+  currentY = cardRow2Y + cardH + 16;
+
+  // 2. INSPECTION DETAILS (2 Cards)
+  doc.fontSize(9.5).font("Helvetica-Bold").fillColor("#0f172a").text("2. INSPECTION DETAILS", 45, currentY);
+  currentY += 14;
+
+  drawCard(45, currentY, "ASSESSED BY (TECHNICIAN)", ticket.technician_name || "Bonifencia A.");
+  drawCard(col2CardX, currentY, "TICKET / WORK ORDER", `RT-${ticket.ticket_number}`);
+  currentY += cardH + 16;
+
+  // 3. HARDWARE & SYSTEM DIAGNOSTIC (Bullet points checklist)
+  doc.fontSize(9.5).font("Helvetica-Bold").fillColor("#0f172a").text("3. HARDWARE & SYSTEM DIAGNOSTIC", 45, currentY);
+  currentY += 12;
+
+  const drawCheckBullet = (title: string, desc: string) => {
+    doc.fontSize(7.5).font("Helvetica-Bold").fillColor("#0f172a").text(`•  ${title}: `, 45, currentY, { continued: true });
+    doc.font("Helvetica").fillColor("#475569").text(desc, { width: 505 });
+    currentY += 13;
+  };
+
+  drawCheckBullet("Physical Condition", "Excellent. No structural damage, dents, or deep scratches observed on the chassis.");
+  drawCheckBullet("Display", "Optimal. No dead pixels, discoloration, or cracks on the screen.");
+  drawCheckBullet("Keyboard & Trackpad", "Fully functional. All keys respond correctly, and the trackpad is responsive with no lag.");
+  drawCheckBullet("Ports & Connectivity", "All USB, HDMI, audio, and power delivery ports have been tested and are working correctly.");
+  drawCheckBullet("Battery Health", "The battery holds normal charge and passes standard diagnostic health checks.");
+  drawCheckBullet("Storage Drive", "Fully operational with no read/write errors detected.");
+
+  currentY += 8;
+
+  // 4. TECHNICIAN'S VERDICT
+  doc.fontSize(9.5).font("Helvetica-Bold").fillColor("#0f172a").text("4. TECHNICIAN'S VERDICT", 45, currentY);
+  currentY += 10;
+
+  const verdictText = `I have thoroughly inspected the ${brandModel} listed above. The equipment is in complete working order, possesses no hardware faults, and is physically sound. It is officially cleared and deemed 'okay' for employee handover and custody release.`;
+  const vH = doc.heightOfString(verdictText, { width: 485 }) + 16;
+
+  doc.rect(45, currentY, 505, vH).fill("#f0fdf4");
+  doc.rect(45, currentY, 3.5, vH).fill("#22c55e");
+  doc.fontSize(7.5).font("Helvetica").fillColor("#166534").text(verdictText, 55, currentY + 8, { width: 485, lineGap: 2 });
+
+  currentY += vH + 24;
+
+  // Dual Signatures
+  doc.rect(45, currentY, 200, 0.75).fill("#0f172a");
+  doc.rect(310, currentY, 200, 0.75).fill("#0f172a");
+
+  doc.fontSize(8.5).font("Helvetica-Bold").fillColor("#0f172a");
+  doc.text(ticket.technician_name || "Bonifencia A.", 45, currentY + 5);
+  doc.font("Helvetica").fontSize(7.5).fillColor("#64748b").text("Hardware Technician  •  Urban Device Care Ltd", 45, currentY + 16);
+
+  doc.font("Helvetica-Bold").fontSize(8.5).fillColor("#0f172a").text("IT Admin / Receiving Officer", 310, currentY + 5);
+  doc.font("Helvetica").fontSize(7.5).fillColor("#64748b").text("Date & Official Stamp", 310, currentY + 16);
+
+  doc.page.margins.bottom = 0;
+  const footerY = doc.page.height - 35;
+  doc.fontSize(7.5).font("Helvetica").fillColor("#94a3b8");
+  doc.text(`${(settings?.company_name || "Urban Device Care Ltd")} — Device Clearance Report`, 45, footerY, { lineBreak: false });
+  doc.text("Page 1 of 1", 500, footerY, { align: "right", lineBreak: false });
+}
+
+// ---------------------------------------------------------------------------------
+// CENTRAL PDF BUFFER GENERATOR
+// ---------------------------------------------------------------------------------
+export async function generateRepairPdfBuffer(
+  docType: string,
+  ticket: any,
+  customerName: string,
+  settings: any,
+  storeUrl?: string,
+  templateStyle?: string
+): Promise<Buffer> {
+  return new Promise(async (resolve, reject) => {
+    try {
+      const doc = new PDFDocument({
+        margins: { top: 35, bottom: 25, left: 45, right: 45 },
+        size: "A4",
+      });
+      const buffers: Buffer[] = [];
+
+      doc.on("data", (chunk) => buffers.push(chunk));
+      doc.on("end", () => resolve(Buffer.concat(buffers)));
+
+      // 1. Resolve Items
       const items: any[] = [];
-      if (ticket.device?.parts_used && ticket.device.parts_used.length > 0) {
+      if (ticket.device?.parts_used && Array.isArray(ticket.device.parts_used)) {
         for (const part of ticket.device.parts_used) {
           items.push({
             title: part.name || "Replacement Part",
@@ -191,107 +851,165 @@ export async function generateRepairDocument(
           });
         }
       }
-      if (Number(ticket.labor_estimate || 0) > 0) {
-        items.push({
-          title: "Labor Charge",
-          quantity: 1,
-          unit_price: Number(ticket.labor_estimate),
-          total: Number(ticket.labor_estimate),
-        });
+      if (ticket.parts && Array.isArray(ticket.parts)) {
+        for (const p of ticket.parts) {
+          const price = Number(p.prices?.[0]?.amount || 0);
+          items.push({
+            title: p.title || "Replacement Part",
+            description: p.sku ? `SKU: ${p.sku}` : "",
+            quantity: 1,
+            unit_price: price,
+            total: price,
+          });
+        }
       }
-      if (ticket.custom_parts && ticket.custom_parts.length > 0) {
+      if (ticket.custom_parts && Array.isArray(ticket.custom_parts)) {
         for (const cp of ticket.custom_parts) {
           items.push({
             title: cp.name || "Custom Part / Service",
+            description: cp.description || "",
             quantity: 1,
             unit_price: Number(cp.price || 0),
             total: Number(cp.price || 0),
           });
         }
       }
-      if (items.length === 0) {
-        const tot = Number(ticket.total_actual || ticket.total_estimate || 0);
+      if (Number(ticket.labor_estimate || 0) > 0) {
         items.push({
-          title: `Repair Service (#${ticket.ticket_number})`,
+          title: "Hardware Repair Labor & Bench Diagnostics",
+          description: "Certified clean-room installation, logic rail testing & QC calibration",
           quantity: 1,
-          unit_price: tot,
-          total: tot,
+          unit_price: Number(ticket.labor_estimate),
+          total: Number(ticket.labor_estimate),
         });
       }
 
-      const totalAmt = Number(ticket.total_actual && ticket.total_actual > 0 ? ticket.total_actual : ticket.total_estimate || 0);
-      const isPaid = ticket.payment_status === "captured" || ticket.payment_status === "paid" || docType === "receipt";
-
-      let storeUrl = process.env.STORE_URL || "http://localhost:3000";
-      const trackingUrl = ticket.approval_token ? `${storeUrl.replace(/\/$/, "")}/repairs/track?token=${ticket.approval_token}` : undefined;
-
-      const { pdfBuffer, record } = await documentService.generateDocument(
-        {
-          display_id: displayId,
-          title: docTitle,
-          type: mappedType,
-          repair_ticket_id: ticket.id,
-          customer: {
-            name: customerName || "Customer",
-            email: customerEmail,
-            phone: customerPhone,
-          },
-          items,
-          total: totalAmt,
-          currency_code: "usd",
-          payment_status: isPaid ? "paid" : "unpaid",
-          payment_link: docType === "job_card" ? trackingUrl : undefined,
-          auto_send: false,
-          notes: ticket.terms_accepted != null ? `Intake Consent: Terms Accepted = ${ticket.terms_accepted ? "Yes" : "No"}, Data Wipe Consent = ${ticket.data_wiped_consent ? "Yes" : "No"}` : undefined,
-          custom_fields: {
-            "Device Model": ticket.device?.model_name || "N/A",
-            "Brand": ticket.device?.brand || "N/A",
-            "Serial / IMEI": ticket.device?.serial_number || ticket.device?.imei || "N/A",
-            "Condition": ticket.device?.condition || "Not specified",
-            "Accessories": ticket.accessories || "None",
-            "Technician": ticket.technician_name || "Unassigned",
-            "Issue": ticket.issue_description || "Standard Repair",
-          },
-        },
-        req.scope,
-      );
-
-      if (pdfBuffer) {
-        res.setHeader("Content-Type", "application/pdf");
-        res.setHeader(
-          "Content-Disposition",
-          `inline; filename="${mappedType}-${record?.display_id || ticket.ticket_number}.pdf"`,
-        );
-        return res.send(pdfBuffer);
+      const totalEstimate = Number(ticket.total_actual && ticket.total_actual > 0 ? ticket.total_actual : ticket.total_estimate || 0);
+      if (items.length === 0) {
+        items.push({
+          title: `Diagnostic & Repair Service (#${ticket.ticket_number})`,
+          description: ticket.issue_description || "Hardware overhaul & bench repair",
+          quantity: 1,
+          unit_price: totalEstimate,
+          total: totalEstimate,
+        });
       }
-    }
-  } catch (err: any) {
-    req.scope
-      .resolve("logger")
-      ?.warn?.(`[generateRepairDocument] Documents plugin delegation fallback: ${err.message}`);
-  }
 
-  // 2. Local fallback if documents plugin is not active
+      const amountPaid = Number(ticket.amount_paid || 0);
+      const balanceDue = Math.max(0, totalEstimate - amountPaid);
+      const totals = { totalEstimate, amountPaid, balanceDue };
+
+      // 2. Resolve Logo Buffer
+      const logoBuffer = await resolveLogoBuffer(settings?.pdf_logo_url);
+
+      // 3. Resolve QR Code Buffer
+      let qrBuffer: Buffer | null = null;
+      try {
+        const qrTarget = ticket.approval_token
+          ? `${(storeUrl || "http://localhost:3000").replace(/\/$/, "")}/repairs/track?token=${ticket.approval_token}`
+          : `${(storeUrl || "http://localhost:3000").replace(/\/$/, "")}/repairs/track?number=${ticket.ticket_number}`;
+        qrBuffer = await QRCode.toBuffer(qrTarget, {
+          errorCorrectionLevel: "H",
+          type: "png",
+          margin: 1,
+          width: 60,
+        });
+      } catch (e) {}
+
+      // 4. Payment Link text
+      let paymentLinkText = "";
+      if (balanceDue > 0 && ticket.approval_token && (docType === "invoice" || docType === "quote")) {
+        const base = (storeUrl || process.env.STORE_URL || "http://localhost:3000").replace(/\/$/, "");
+        paymentLinkText = `Pay Online: ${base}/repairs/track?token=${ticket.approval_token} | `;
+      }
+
+      // 5. Select Layout Engine
+      const cleanType = (docType || "invoice").toLowerCase().trim();
+      if (cleanType === "job_card") {
+        renderJobCardDocument(doc, ticket, customerName, settings, items, totals, logoBuffer, qrBuffer);
+      } else if (cleanType === "service_report" || cleanType === "diagnostic") {
+        renderServiceReportDocument(doc, ticket, customerName, settings, items, totals, logoBuffer);
+      } else if (cleanType === "handover") {
+        renderHandoverReportDocument(doc, ticket, customerName, settings, logoBuffer);
+      } else {
+        // invoice, quote, receipt, or other
+        renderZohoExactDocument(doc, cleanType, ticket, customerName, settings, items, totals, logoBuffer, qrBuffer, paymentLinkText);
+      }
+
+      doc.end();
+    } catch (err) {
+      reject(err);
+    }
+  });
+}
+
+// ---------------------------------------------------------------------------------
+// CENTRAL CONTROLLER
+// ---------------------------------------------------------------------------------
+export async function generateRepairDocument(
+  docType: string,
+  ticket: any,
+  customerName: string,
+  res: MedusaResponse,
+  req: MedusaRequest,
+) {
   const repairService: RepairModuleService = req.scope.resolve(REPAIR_MODULE);
   const [settings] = await repairService.listRepairSettings({});
-  let zohoError = "";
-  
-  if (!settings?.zoho_books_enabled) { 
-    zohoError = "Zoho Books Integration is disabled in Admin settings."; 
-  } else if (!settings.zoho_client_id || !settings.zoho_client_secret || !settings.zoho_refresh_token || !settings.zoho_organization_id) { 
-    zohoError = "Zoho Books enabled but missing API credentials."; 
-  } else {
-    const logger = req.scope.resolve("logger");
-    const zoho = new ZohoBooksService({
-      client_id: settings.zoho_client_id,
-      client_secret: settings.zoho_client_secret,
-      refresh_token: settings.zoho_refresh_token,
-      organization_id: settings.zoho_organization_id,
-      domain: settings.zoho_domain || "com",
-    }, logger);
+  const logger = req.scope.resolve("logger");
+
+  let storeUrl = process.env.STORE_URL || "http://localhost:3000";
+  if (settings?.storefront_url) {
+    storeUrl = settings.storefront_url;
+  }
+
+  const cleanType = (docType || "job_card").toLowerCase().trim();
+
+  // 0. If medusajs-documents-plugin is registered, check if document already exists or stream it directly
+  try {
+    const docService: any = req.scope.resolve("documents", { allowUnregistered: true });
+    if (docService) {
+      const typeFilter = cleanType === "quote" ? "estimate" : cleanType;
+      const docs = await docService.listDocumentRecords({
+        repair_ticket_id: ticket.id,
+        type: typeFilter,
+      }).catch(() => []);
+      if (docs && docs.length > 0) {
+        docs.sort((a: any, b: any) => new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime());
+        const pdfBuf = await docService.getPdfForRecord(docs[0].id, req.scope).catch(() => null);
+        if (pdfBuf) {
+          res.setHeader("Content-Type", "application/pdf");
+          res.setHeader("Content-Disposition", `inline; filename="${cleanType}-${ticket.ticket_number}.pdf"`);
+          res.setHeader("Content-Length", String(pdfBuf.length));
+          res.setHeader("Cache-Control", "public, max-age=3600");
+          return res.send(pdfBuf);
+        }
+      }
+    }
+  } catch (docErr: any) {
+    logger?.warn?.(`[generateRepairDocument] Documents module check skipped: ${docErr.message}`);
+  }
+
+  // 1. If Zoho Books is enabled AND document is invoice, quote, or receipt, try Zoho integration
+  if (
+    settings?.zoho_books_enabled &&
+    settings.zoho_client_id &&
+    settings.zoho_client_secret &&
+    settings.zoho_refresh_token &&
+    settings.zoho_organization_id &&
+    ["invoice", "quote", "receipt"].includes(cleanType)
+  ) {
+    const zoho = new ZohoBooksService(
+      {
+        client_id: settings.zoho_client_id,
+        client_secret: settings.zoho_client_secret,
+        refresh_token: settings.zoho_refresh_token,
+        organization_id: settings.zoho_organization_id,
+        domain: settings.zoho_domain || "com",
+      },
+      logger
+    );
 
     try {
-      // 1. Sync Contact
       let customerObj: any = { email: `guest-${ticket.id}@example.com`, first_name: customerName };
       if (ticket.customer_id) {
         const customerModule = req.scope.resolve("customer", { allowUnregistered: true });
@@ -300,435 +1018,64 @@ export async function generateRepairDocument(
           if (c) customerObj = c;
         }
       }
-      
+
       const contactId = await zoho.syncContact(customerObj);
-      
-      // 2. Generate Estimate or Invoice or Receipt
       const metadata = ticket.metadata || {};
 
       const targetTotal = (ticket.total_actual && ticket.total_actual > 0) ? ticket.total_actual : ticket.total_estimate;
       const balanceDue = Math.max(0, targetTotal - (ticket.amount_paid || 0));
-      if (balanceDue > 0 && ticket.approval_token && (docType === "invoice" || docType === "quote")) {
-          let sUrl = process.env.STORE_URL || "http://localhost:3000";
-          if (settings?.storefront_url) sUrl = settings.storefront_url;
-          sUrl = sUrl.replace(/\/$/, "");
-          const lUrl = `${sUrl}/repairs/track?token=${ticket.approval_token}`;
-          const shortL = await getOrGenerateShortUrl(lUrl, repairService, sUrl);
-          ticket._paymentLinkText = `Pay Online: ${shortL}`;
+      if (balanceDue > 0 && ticket.approval_token && (cleanType === "invoice" || cleanType === "quote")) {
+        const sUrl = storeUrl.replace(/\/$/, "");
+        const lUrl = `${sUrl}/repairs/track?token=${ticket.approval_token}`;
+        const shortL = await getOrGenerateShortUrl(lUrl, repairService, sUrl);
+        ticket._paymentLinkText = `Pay Online: ${shortL}`;
       }
 
-      if (docType === "quote") {
+      if (cleanType === "quote") {
         let estId = metadata.zoho_estimate_id as string;
         if (!estId) {
           estId = await zoho.createEstimate(contactId, ticket);
           await repairService.updateRepairTickets({ id: ticket.id, metadata: { ...metadata, zoho_estimate_id: estId } });
         }
         const pdfBuffer = await zoho.getDocumentPdf(estId, "estimate");
-        const modifiedBuffer = await postProcessZohoPdf(Buffer.from(pdfBuffer), ticket, docType);
+        const modifiedBuffer = await postProcessZohoPdf(Buffer.from(pdfBuffer), ticket, cleanType);
         res.setHeader("Content-Type", "application/pdf");
         res.setHeader("Content-Disposition", `inline; filename="Repair-Quote-${ticket.ticket_number}.pdf"`);
         return res.send(modifiedBuffer);
-      } else if (docType === "receipt" && metadata.zoho_payment_id) {
+      } else if (cleanType === "receipt" && metadata.zoho_payment_id) {
         const pdfBuffer = await zoho.getPaymentReceiptPdf(metadata.zoho_payment_id as string);
-        const modifiedBuffer = await postProcessZohoPdf(Buffer.from(pdfBuffer), ticket, docType);
+        const modifiedBuffer = await postProcessZohoPdf(Buffer.from(pdfBuffer), ticket, cleanType);
         res.setHeader("Content-Type", "application/pdf");
         res.setHeader("Content-Disposition", `inline; filename="Repair-Receipt-${ticket.ticket_number}.pdf"`);
         return res.send(modifiedBuffer);
-      } else if (docType === "invoice") {
+      } else if (cleanType === "invoice") {
         let invId = metadata.zoho_invoice_id as string;
         if (!invId) {
           invId = await zoho.createInvoice(contactId, ticket);
           await repairService.updateRepairTickets({ id: ticket.id, metadata: { ...metadata, zoho_invoice_id: invId } });
         }
         const pdfBuffer = await zoho.getDocumentPdf(invId, "invoice");
-        const modifiedBuffer = await postProcessZohoPdf(Buffer.from(pdfBuffer), ticket, docType);
+        const modifiedBuffer = await postProcessZohoPdf(Buffer.from(pdfBuffer), ticket, cleanType);
         res.setHeader("Content-Type", "application/pdf");
         res.setHeader("Content-Disposition", `inline; filename="Repair-Invoice-${ticket.ticket_number}.pdf"`);
         return res.send(modifiedBuffer);
       }
-      // If docType is "job_card" or anything else, it bypasses Zoho and generates locally using PDFKit
     } catch (e: any) {
-      zohoError = `Zoho Sync Error: ${e.message}`; 
-      logger.error(`Zoho Books Integration failed: ${e.message}.`);
+      logger?.warn?.(`[generateRepairDocument] Zoho Books sync failed, falling back to local PDFKit: ${e.message}`);
     }
   }
 
-  const parseNum = (val: any) => {
-    if (!val) return 0;
-    if (typeof val === "object" && "value" in val) return Number(val.value);
-    return Number(val);
-  };
-
-  const tTotal = parseNum(ticket.total_estimate);
-  const tActual = parseNum(ticket.total_actual);
-  const finalTotal = ticket.status === "completed" && tActual > 0 ? tActual : tTotal;
-
-  // Generate QR code
-  const qrUrl = `${process.env.STORE_URL || "http://localhost:3000"}/store/repairs/track?number=${ticket.ticket_number}`;
-  let qrBuffer: Buffer | null = null;
+  // 2. High-Fidelity Local PDFKit Generation
   try {
-    qrBuffer = await QRCode.toBuffer(qrUrl, {
-      errorCorrectionLevel: "H",
-      type: "png",
-      margin: 1,
-      width: 60,
-    });
-  } catch (e) {}
-
-  const doc = new PDFDocument({ margin: 50, size: "A4" });
-  res.setHeader("Content-Type", "application/pdf");
-  res.setHeader(
-    "Content-Disposition",
-    `attachment; filename="${ticket.ticket_number}-${docType}.pdf"`,
-  );
-
-  doc.pipe(res);
-
-  // 1. Logo
-  try {
-      if (settings?.pdf_logo_url) {
-          const response = await fetch(settings.pdf_logo_url);
-          const arrayBuffer = await response.arrayBuffer();
-          const buffer = Buffer.from(arrayBuffer);
-          doc.image(buffer, 50, 40, { width: 140 });
-      } else {
-          const logoPath = path.resolve(process.cwd(), "src/utils/assets/logo.png");
-          if (fs.existsSync(logoPath)) {
-              doc.image(logoPath, 50, 40, { width: 140 });
-          } else {
-              doc.fontSize(24).font("Helvetica-Bold").fillColor("#333").text(settings?.company_name || "URBAN DEVICE CARE", 50, 50);
-          }
-      }
-  } catch (e) {
-      doc.fontSize(24).font("Helvetica-Bold").fillColor("#333").text(settings?.company_name || "URBAN DEVICE CARE", 50, 50);
+    const pdfBuffer = await generateRepairPdfBuffer(cleanType, ticket, customerName, settings, storeUrl);
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader(
+      "Content-Disposition",
+      `inline; filename="${cleanType}-${ticket.ticket_number}.pdf"`
+    );
+    return res.send(pdfBuffer);
+  } catch (error: any) {
+    logger?.error?.(`[generateRepairDocument] Failed to generate PDF: ${error.message}`);
+    res.status(500).json({ message: "Failed to generate PDF document", error: error.message });
   }
-
-  // Address below logo
-  let addressY = 95;
-  if (settings?.company_name) {
-      doc.fontSize(10).font("Helvetica-Bold").fillColor("#000").text(settings.company_name.toUpperCase(), 50, addressY);
-      addressY += 14;
-  }
-  doc.fontSize(9).font("Helvetica").fillColor("#666");
-  if (settings?.pdf_address) {
-      doc.text(settings.pdf_address, 50, addressY, { width: 250 });
-      addressY += doc.heightOfString(settings.pdf_address, { width: 250 }) + 2;
-  }
-  if (settings?.pdf_phone) { doc.text(`Phone: ${settings.pdf_phone}`, 50, addressY); addressY += 12; }
-  if (settings?.pdf_email) { doc.text(`Email: ${settings.pdf_email}`, 50, addressY); addressY += 12; }
-  if (settings?.pdf_website) { doc.text(`Web: ${settings.pdf_website}`, 50, addressY); addressY += 12; }
-
-  // 2. Document Title & Number
-  let title = "INVOICE";
-  let prefix = "INV";
-  if (docType === "job_card") { title = "JOB CARD"; prefix = "JOB"; }
-  else if (docType === "receipt") { title = "RECEIPT"; prefix = "REC"; }
-  else if (docType === "quote") { title = "QUOTATION"; prefix = "QUO"; }
-
-  doc.fontSize(26).font("Helvetica").fillColor("#000").text(title, 350, 50, { align: "right" });
-  
-  // Format doc number
-  let docNumber = `RT-${ticket.ticket_number}`;
-  if (docType === "receipt") {
-    // try to get invoice number if synced
-    if (ticket.metadata?.zoho_invoice_id) {
-        docNumber = `INV-${ticket.metadata.zoho_invoice_id}`; 
-    }
-  }
-  
-  doc.fontSize(10).font("Helvetica-Bold").text(docNumber, 350, 80, { align: "right" });
-
-  if (docType === "invoice") {
-      const isPaid = ticket.payment_status === "captured" || ticket.payment_status === "paid" || ticket.status === "completed";
-      const statusText = isPaid ? "PAID" : "UNPAID";
-      const statusColor = isPaid ? "#008000" : "#CC0000";
-      doc.fontSize(10).font("Helvetica-Bold").fillColor(statusColor).text(statusText, 350, 95, { align: "right" });
-  }
-
-  // 3. Balance Due
-  let balanceDue = 0;
-  let paymentMade = 0;
-  if (docType === "invoice") {
-     paymentMade = parseNum(ticket.amount_paid) || 0;
-     balanceDue = finalTotal - paymentMade;
-  } else if (docType === "receipt") {
-     paymentMade = parseNum(ticket.amount_paid) || finalTotal; 
-  }
-  
-  if (docType === "invoice") {
-      doc.fontSize(9).font("Helvetica").fillColor("#666").text("Balance Due", 350, 115, { align: "right" });
-      doc.fontSize(14).font("Helvetica-Bold").fillColor("#000").text(`KES${formatCurrency(balanceDue)}`, 350, 128, { align: "right" });
-  } else if (docType === "receipt") {
-      doc.fontSize(9).font("Helvetica").fillColor("#666").text("Amount Paid", 350, 115, { align: "right" });
-      doc.fontSize(14).font("Helvetica-Bold").fillColor("#008000").text(`KES${formatCurrency(paymentMade)}`, 350, 128, { align: "right" });
-  }
-
-  let currentY = 170;
-
-  // 4. Meta Information
-  doc.rect(50, currentY, 495, 2).fill("#EEEEEE");
-  currentY += 15;
-  
-  const metaY = currentY;
-  let rowY = metaY;
-
-  const addMetaRow = (label: string, value: string, yPos: number) => {
-      doc.font("Helvetica").fontSize(9).fillColor("#666").text(label, 350, yPos, { width: 80, align: "right" });
-      doc.font("Helvetica-Bold").fillColor("#000").text(value, 440, yPos, { width: 105, align: "right" });
-  };
-
-  if (docType === "quote") {
-      addMetaRow("Job Card No :", ticket.ticket_number, rowY); rowY += 15;
-      addMetaRow("Quote Date :", formatDate(ticket.created_at || new Date()), rowY); rowY += 15;
-      const validUntil = new Date(ticket.created_at || new Date());
-      validUntil.setDate(validUntil.getDate() + 14);
-      addMetaRow("Valid Until :", formatDate(validUntil), rowY); rowY += 15;
-  } else if (docType === "job_card") {
-      addMetaRow("Intake Date :", formatDate(ticket.created_at || new Date()), rowY); rowY += 15;
-      addMetaRow("Status :", String(ticket.status || "Unknown").toUpperCase(), rowY); rowY += 15;
-  } else if (docType === "receipt") {
-      addMetaRow("Payment Date :", formatDate(new Date()), rowY); rowY += 15;
-      addMetaRow("Payment Ref :", ticket.payment_collection_id || "Cash/Manual", rowY); rowY += 15;
-  } else {
-      addMetaRow("Job Card No :", ticket.ticket_number, rowY); rowY += 15;
-      addMetaRow("Invoice Date :", formatDate(ticket.created_at || new Date()), rowY); rowY += 15;
-      addMetaRow("Terms :", "Due on Receipt", rowY); rowY += 15;
-  }
-
-  // Bill To / Customer Data
-  doc.font("Helvetica-Bold").fontSize(10).fillColor("#000").text(customerName || "Customer", 50, metaY);
-  doc.font("Helvetica").fontSize(9).fillColor("#333");
-  
-  currentY = Math.max(rowY, metaY + 40) + 20;
-
-  // DOCUMENT SPECIFIC LAYOUTS
-  
-  if (docType === "job_card") {
-      // --- JOB CARD LAYOUT (Minimal, Info-only, No Prices) ---
-      
-      doc.rect(50, currentY, 495, 20).fill("#444444");
-      doc.fillColor("#FFFFFF").font("Helvetica-Bold").fontSize(9);
-      doc.text("DEVICE DETAILS", 60, currentY + 6);
-      currentY += 30;
-      
-      doc.fillColor("#333333").font("Helvetica").fontSize(9);
-      if (ticket.device) {
-          doc.font("Helvetica-Bold").text("Brand / Model:", 50, currentY);
-          doc.font("Helvetica").text(`${ticket.device.brand || "Unknown"} ${ticket.device.model_name || ""}`, 150, currentY); currentY += 15;
-          
-          doc.font("Helvetica-Bold").text("Serial Number:", 50, currentY);
-          doc.font("Helvetica").text(ticket.device.serial_number || "N/A", 150, currentY); currentY += 15;
-          
-          doc.font("Helvetica-Bold").text("IMEI:", 50, currentY);
-          doc.font("Helvetica").text(ticket.device.imei || "N/A", 150, currentY); currentY += 15;
-          
-          doc.font("Helvetica-Bold").text("Condition:", 50, currentY);
-          doc.font("Helvetica").text(ticket.device.condition || "Not specified", 150, currentY, { width: 350 }); 
-          currentY += doc.heightOfString(ticket.device.condition || "Not specified", { width: 350 }) + 5;
-      }
-      
-      doc.font("Helvetica-Bold").text("Accessories:", 50, currentY);
-      doc.font("Helvetica").text(ticket.accessories || "None", 150, currentY, { width: 350 });
-      currentY += doc.heightOfString(ticket.accessories || "None", { width: 350 }) + 15;
-      
-      doc.rect(50, currentY, 495, 20).fill("#444444");
-      doc.fillColor("#FFFFFF").font("Helvetica-Bold").fontSize(9);
-      doc.text("REPORTED ISSUE", 60, currentY + 6);
-      currentY += 30;
-      
-      doc.fillColor("#333333").font("Helvetica").fontSize(9);
-      doc.text(ticket.issue_description || "No description provided.", 50, currentY, { width: 495 });
-      currentY += doc.heightOfString(ticket.issue_description || "No description provided.", { width: 495 }) + 30;
-      
-      // Signatures
-      if (currentY > 650) { doc.addPage(); currentY = 50; }
-      doc.moveTo(50, currentY).lineTo(250, currentY).strokeColor("#000000").stroke();
-      doc.fontSize(10).font("Helvetica").text("Technician Signature", 50, currentY + 5);
-      
-      doc.moveTo(350, currentY).lineTo(545, currentY).stroke();
-      doc.text("Customer Signature", 350, currentY + 5);
-
-  } else if (docType === "receipt") {
-      // --- RECEIPT LAYOUT ---
-      
-      doc.rect(50, currentY, 495, 20).fill("#444444");
-      doc.fillColor("#FFFFFF").font("Helvetica-Bold").fontSize(9);
-      doc.text("PAYMENT DETAILS", 60, currentY + 6);
-      currentY += 30;
-      
-      doc.fillColor("#333333").font("Helvetica").fontSize(9);
-      doc.font("Helvetica-Bold").text("Payment Reference:", 50, currentY);
-      doc.font("Helvetica").text(ticket.payment_collection_id || "Manual Capture / Cash", 170, currentY); currentY += 15;
-      
-      doc.font("Helvetica-Bold").text("Amount Paid:", 50, currentY);
-      doc.font("Helvetica").text(`KES ${formatCurrency(paymentMade)}`, 170, currentY); currentY += 15;
-      
-      doc.font("Helvetica-Bold").text("For Job Card:", 50, currentY);
-      doc.font("Helvetica").text(ticket.ticket_number, 170, currentY); currentY += 30;
-      
-      // Stamp
-      doc.save()
-         .translate(400, currentY + 20)
-         .rotate(-15)
-         .rect(0, 0, 100, 40)
-         .lineWidth(3)
-         .strokeColor("#22c55e")
-         .stroke()
-         .fontSize(20)
-         .font("Helvetica-Bold")
-         .fillColor("#22c55e")
-         .text("PAID", 22, 10)
-         .restore();
-         
-      currentY += 80;
-
-  } else {
-      // --- QUOTE / INVOICE LAYOUT (Pricing tables) ---
-      
-      doc.rect(50, currentY, 495, 20).fill("#444444");
-      doc.fillColor("#FFFFFF").font("Helvetica-Bold").fontSize(9);
-      doc.text("#", 60, currentY + 6);
-      doc.text("Description", 90, currentY + 6);
-      doc.text("Qty", 350, currentY + 6, { width: 30, align: "center" });
-      doc.text("Rate", 390, currentY + 6, { width: 60, align: "right" });
-      doc.text("Amount", 460, currentY + 6, { width: 75, align: "right" });
-      
-      currentY += 30;
-      doc.fillColor("#333333").font("Helvetica").fontSize(9);
-
-      let i = 1;
-      const drawRow = (desc: string, qty: number, rate: number, amt: number) => {
-          if (currentY > 650) { doc.addPage(); currentY = 50; }
-          
-          doc.text(i.toString(), 60, currentY);
-          doc.text(desc, 90, currentY, { width: 250 });
-          doc.text(qty.toFixed(2), 350, currentY, { width: 30, align: "center" });
-          doc.text(formatCurrency(rate), 390, currentY, { width: 60, align: "right" });
-          doc.text(formatCurrency(amt), 460, currentY, { width: 75, align: "right" });
-          
-          const height = doc.heightOfString(desc, { width: 250 }) || 10;
-          currentY += height + 10;
-          
-          doc.moveTo(50, currentY - 5).lineTo(545, currentY - 5).lineWidth(0.5).strokeColor("#EEEEEE").stroke();
-          i++;
-      };
-
-      if (ticket.parts && Array.isArray(ticket.parts)) {
-          for (const p of ticket.parts) {
-              const price = parseNum(p.prices?.[0]?.amount);
-              drawRow(`${p.title} (SKU: ${p.sku || "N/A"})`, 1, price, price);
-          }
-      }
-
-      if (ticket.custom_parts && Array.isArray(ticket.custom_parts)) {
-          for (const cp of ticket.custom_parts) {
-              const price = parseNum(cp.price);
-              drawRow(cp.name, 1, price, price);
-          }
-      }
-
-      const labor = parseNum(ticket.labor_estimate);
-      if (labor > 0) {
-          drawRow("Labor & Service Fee", 1, labor, labor);
-      }
-
-      if (i === 1) {
-          doc.text("No cost items added yet.", 90, currentY);
-          currentY += 20;
-          doc.moveTo(50, currentY - 5).lineTo(545, currentY - 5).lineWidth(0.5).strokeColor("#EEEEEE").stroke();
-      }
-
-      currentY += 10;
-      const summaryX = 350;
-
-      const addSummaryRow = (label: string, value: string, yPos: number, isBold: boolean = false, valColor: string = "#333", bg: boolean = false) => {
-          if (bg) { doc.rect(250, yPos - 5, 295, 20).fill("#F4F4F4"); }
-          doc.font(isBold ? "Helvetica-Bold" : "Helvetica").fillColor("#333").fontSize(9);
-          doc.text(label, summaryX, yPos, { width: 80, align: "right" });
-          doc.fillColor(valColor).font(isBold ? "Helvetica-Bold" : "Helvetica").text(value, summaryX + 90, yPos, { width: 95, align: "right" });
-      };
-
-      addSummaryRow("Sub Total", formatCurrency(finalTotal), currentY); currentY += 20;
-      doc.moveTo(300, currentY - 10).lineTo(545, currentY - 10).lineWidth(0.5).strokeColor("#DDDDDD").stroke();
-
-      addSummaryRow("Total", `KES ${formatCurrency(finalTotal)}`, currentY, true); currentY += 20;
-
-      if (docType === "invoice") {
-          addSummaryRow("Payment Made", `(-) ${formatCurrency(paymentMade)}`, currentY, false, "#C00000"); currentY += 20;
-          addSummaryRow("Balance Due", `KES ${formatCurrency(balanceDue)}`, currentY, true, "#000", true); currentY += 20;
-      }
-  }
-
-  // Terms and conditions
-  if (settings?.pdf_terms && docType !== "receipt") {
-      currentY += 40;
-      if (currentY > 650) { doc.addPage(); currentY = 50; }
-      doc.fontSize(9).font("Helvetica-Bold").fillColor("#333").text("Terms & Conditions", 50, currentY);
-      doc.fontSize(8).font("Helvetica").fillColor("#666").text(settings.pdf_terms, 50, currentY + 15, { width: 495 });
-  }
-
-  const pageHeight = doc.page.height;
-  const footerY = pageHeight - 90;
-  
-  let paymentLinkText = "";
-  if (docType === "invoice" || docType === "quote") {
-      const targetTotal = (ticket.total_actual && ticket.total_actual > 0) ? ticket.total_actual : ticket.total_estimate;
-      const balanceDue = Math.max(0, targetTotal - (ticket.amount_paid || 0));
-      if (balanceDue > 0 && ticket.approval_token) {
-          let storeUrl = process.env.STORE_URL || "http://localhost:3000";
-          if (settings?.storefront_url) storeUrl = settings.storefront_url;
-          storeUrl = storeUrl.replace(/\/$/, "");
-          
-          const longUrl = `${storeUrl}/repairs/track?token=${ticket.approval_token}`;
-          const shortUrl = await getOrGenerateShortUrl(longUrl, repairService, storeUrl);
-          paymentLinkText = `Pay Online: ${shortUrl} | `;
-      }
-  }
-  
-  doc.fontSize(9).font("Helvetica-Bold").fillColor("#333");
-  if (settings?.pdf_payment_details && docType !== "receipt") {
-      doc.text(paymentLinkText + settings.pdf_payment_details.replace(/\n/g, ' | '), 50, footerY, { width: 495 });
-  } else if (docType !== "receipt") {
-      doc.text(paymentLinkText + "Thanks for your business. | Paybill: 880100 - Acc No: PAYURBANDEVICE", 50, footerY);
-  } else {
-      doc.text("Thanks for your business.", 50, footerY);
-  }
-
-  if (qrBuffer) {
-      doc.image(qrBuffer, 485, footerY - 20, { width: 60 });
-  }
-  
-  doc.moveTo(50, footerY + 30).lineTo(545, footerY + 30).lineWidth(0.5).strokeColor("#CCCCCC").stroke();
-  doc.fontSize(8).font("Helvetica").fillColor("#999").text(`POWERED BY ${settings?.company_name?.toUpperCase() || "URBAN DEVICE CARE"}`, 50, footerY + 40, { lineBreak: false });
-  doc.text("1", 530, footerY + 40, { align: "right", lineBreak: false });
-
-  let localWatermarkText = "";
-  let localWatermarkColor = "#cccccc";
-  const localIsPaid = ticket.payment_status === "captured" || ticket.payment_status === "paid" || docType === "receipt";
-  
-  if (docType === "invoice" || docType === "receipt") {
-    localWatermarkText = localIsPaid ? "PAID" : "UNPAID";
-    localWatermarkColor = localIsPaid ? "#22c55e" : "#ef4444"; 
-  } else if (docType === "quote") {
-    localWatermarkText = "QUOTATION";
-    localWatermarkColor = "#cccccc";
-  }
-  
-  if (ticket.status === "cancelled") {
-    localWatermarkText = "CANCELLED";
-    localWatermarkColor = "#ef4444";
-  }
-
-  if (localWatermarkText) {
-    doc.save()
-       .translate(doc.page.width / 2, doc.page.height / 2)
-       .rotate(-45, { origin: [0, 0] })
-       .fontSize(100)
-       .fillColor(localWatermarkColor)
-       .fillOpacity(0.15)
-       .text(localWatermarkText, -250, -50, { align: "center", width: 500 })
-       .restore();
-  }
-
-  doc.end();
 }

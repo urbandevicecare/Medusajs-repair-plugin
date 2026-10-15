@@ -11,7 +11,14 @@ export async function GET(req: MedusaRequest, res: MedusaResponse) {
     settings = await repairService.createRepairSettings({
       email_notifications_enabled: true,
       sms_notifications_enabled: true,
-      whatsapp_notifications_enabled: true,
+      whatsapp_notifications_enabled: false,
+      company_name: "Urban Device Care Ltd",
+      invoice_template: "zoho_exact",
+      estimate_template: "zoho_exact",
+      receipt_template: "zoho_exact",
+      job_card_template: "standard",
+      service_report_template: "standard",
+      handover_template: "standard",
     });
   }
 
@@ -35,6 +42,24 @@ export async function POST(
     paystack_secret_key?: string;
     company_name?: string;
     storefront_url?: string;
+    pdf_logo_url?: string;
+    pdf_address?: string;
+    pdf_phone?: string;
+    pdf_email?: string;
+    pdf_website?: string;
+    pdf_payment_details?: string;
+    pdf_terms?: string;
+    kra_pin?: string;
+    invoice_template?: string;
+    estimate_template?: string;
+    receipt_template?: string;
+    job_card_template?: string;
+    service_report_template?: string;
+    handover_template?: string;
+    email_subject_template?: string;
+    email_body_template?: string;
+    sms_body_template?: string;
+    whatsapp_body_template?: string;
   }>,
   res: MedusaResponse
 ) {
@@ -45,7 +70,8 @@ export async function POST(
     settings = await repairService.createRepairSettings({
       email_notifications_enabled: req.body.email_notifications_enabled ?? true,
       sms_notifications_enabled: req.body.sms_notifications_enabled ?? true,
-      whatsapp_notifications_enabled: req.body.whatsapp_notifications_enabled ?? true,
+      whatsapp_notifications_enabled: req.body.whatsapp_notifications_enabled ?? false,
+      ...req.body,
     });
   } else {
     settings = await repairService.updateRepairSettings({

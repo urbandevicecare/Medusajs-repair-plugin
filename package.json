@@ -33,6 +33,7 @@
   "scripts": {
     "build": "medusa plugin:build",
     "dev": "node dev.js",
+    "test": "npx tsx --test tests/notifications-and-documents.test.ts",
     "prepublishOnly": "medusa plugin:build"
   },
   "devDependencies": {

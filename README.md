@@ -145,6 +145,13 @@ To verify the system's integrations (such as price formatting, Zoho Books tax ha
 
 ## Changelog
 
+### v0.1.99
+- **Document Templates & Interactive Previews**: Added interactive document template selector and live preview modal in the Admin Settings tab. Features exact Zoho Books parity for Quotes, Invoices, and Receipts, and distinct professional PDFKit layouts for non-Zoho documents (Intake Job Cards, Service & Diagnostic Reports, and IT Asset Handover & Inspection Reports).
+- **Editable Notification Templates with Merge Tags**: Admins can now customize Email and SMS notification templates directly from the Repair Settings tab using click-to-insert merge tag chips (`{customer_name}`, `{ticket_number}`, `{device}`, `{status}`, `{approval_url}`, `{total_estimate}`, `{company_name}`, `{pdf_url}`).
+- **Milestone-Tiered Notification System**: Overhauled `notifications.ts` to suppress notification spam on internal bench statuses (`diagnosing`, `repairing`). Reserved high-cost SMS exclusively for actionable milestones (`awaiting_approval`, `ready`, `cancelled`), saving up to 90% in SMS gateway costs.
+- **Admin Silent Status Updates**: Added a "Silent update (do not notify customer)" checkbox to the Admin ticket status modal, allowing internal notes or minor adjustments without firing customer alerts.
+- **Seamless Documents Plugin Handover**: Fully harmonized document generation with `medusajs-documents-plugin` as the document generation engine while `Meduajs-repair-plugin` acts as the sole communication dispatcher. Fixed shortlink routing and public streaming endpoints to eliminate 404 errors.
+
 ### v0.1.98
 - **PDF Layout Polish**: Added company contact details (address, phone, email, website) directly below the logo on PDF documents. Cleaned up the "Bill To" section by removing redundant Customer ID numbers, and suppressed internal Zoho sync error messages from customer-facing PDFs.
 - **Short URL Redirection Fix**: Resolved a 500 error on `/r/[code]` shortlink redirects by properly querying and returning redirects.

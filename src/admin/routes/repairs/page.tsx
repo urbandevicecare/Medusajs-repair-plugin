@@ -16,7 +16,7 @@ import {
   Switch,
 } from "@medusajs/ui";
 import { useEffect, useState } from "react";
-import { Wrench } from "@medusajs/icons";
+import { Wrench, DocumentText, ArrowPath, ArrowDownTray, Envelope, Sparkles } from "@medusajs/icons";
 import { useStoreCurrency } from "../../lib/use-store-currency";
 import { useNavigate } from "react-router-dom";
 
@@ -46,7 +46,7 @@ const RepairsPage = () => {
   const [settings, setSettings] = useState({
     email_notifications_enabled: true,
     sms_notifications_enabled: true,
-    whatsapp_notifications_enabled: true,
+    whatsapp_notifications_enabled: false,
     zoho_books_enabled: false,
     zoho_client_id: "",
     zoho_client_secret: "",
@@ -56,9 +56,88 @@ const RepairsPage = () => {
     paystack_enabled: false,
     paystack_public_key: "",
     paystack_secret_key: "",
-    company_name: "Repair Shop",
+    company_name: "Urban Device Care Ltd",
     storefront_url: "",
+    pdf_logo_url: "",
+    pdf_address: "",
+    pdf_phone: "",
+    pdf_email: "",
+    pdf_website: "",
+    pdf_payment_details: "",
+    pdf_terms: "",
+    kra_pin: "",
+    invoice_template: "zoho_exact",
+    estimate_template: "zoho_exact",
+    receipt_template: "zoho_exact",
+    job_card_template: "standard",
+    service_report_template: "standard",
+    handover_template: "standard",
+    email_subject_template: "",
+    email_body_template: "",
+    sms_body_template: "",
+    whatsapp_body_template: "",
   });
+
+  // Template Preview States
+  const [previewModalOpen, setPreviewModalOpen] = useState(false);
+  const [previewType, setPreviewType] = useState("job_card");
+  const [previewStyle, setPreviewStyle] = useState("standard");
+  const [previewBlobUrl, setPreviewBlobUrl] = useState<string | null>(null);
+  const [isPreviewModalLoading, setIsPreviewModalLoading] = useState(false);
+  const [previewLoading, setPreviewLoading] = useState<string | null>(null);
+
+  const loadPreviewBlob = async (type: string, style: string) => {
+    setIsPreviewModalLoading(true);
+    try {
+      const res = await fetch(`/admin/repairs/templates/preview?type=${type}&style=${style}`, {
+        credentials: "include",
+      });
+      if (!res.ok) {
+        const err = await res.text();
+        alert(`Preview failed: ${err || res.statusText}`);
+        return;
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      setPreviewBlobUrl((prev) => {
+        if (prev) URL.revokeObjectURL(prev);
+        return url;
+      });
+    } catch (e: any) {
+      alert(`Error loading preview: ${e.message}`);
+    } finally {
+      setIsPreviewModalLoading(false);
+      setPreviewLoading(null);
+    }
+  };
+
+  const handlePreviewDocument = async (type: string, style: string) => {
+    setPreviewLoading(type);
+    setPreviewType(type);
+    setPreviewStyle(style);
+    setPreviewModalOpen(true);
+    await loadPreviewBlob(type, style);
+  };
+
+  const switchPreview = async (type: string, style: string) => {
+    setPreviewType(type);
+    setPreviewStyle(style);
+    await loadPreviewBlob(type, style);
+  };
+
+  const handleDownloadPreview = () => {
+    if (!previewBlobUrl) return;
+    const a = document.createElement("a");
+    a.href = previewBlobUrl;
+    a.download = `preview-${previewType}.pdf`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+  };
+
+  const handleOpenPreviewNewTab = () => {
+    window.open(`/admin/repairs/templates/preview?type=${previewType}&style=${previewStyle}`, "_blank");
+  };
 
   const loadSettings = () => {
     fetch("/admin/repairs/settings", { credentials: "include" })
@@ -74,8 +153,26 @@ const RepairsPage = () => {
             zoho_domain: data.settings.zoho_domain || "com",
             paystack_public_key: data.settings.paystack_public_key || "",
             paystack_secret_key: data.settings.paystack_secret_key || "",
-            company_name: data.settings.company_name || "Repair Shop",
+            company_name: data.settings.company_name || "Urban Device Care Ltd",
             storefront_url: data.settings.storefront_url || "",
+            pdf_logo_url: data.settings.pdf_logo_url || "",
+            pdf_address: data.settings.pdf_address || "",
+            pdf_phone: data.settings.pdf_phone || "",
+            pdf_email: data.settings.pdf_email || "",
+            pdf_website: data.settings.pdf_website || "",
+            pdf_payment_details: data.settings.pdf_payment_details || "",
+            pdf_terms: data.settings.pdf_terms || "",
+            kra_pin: data.settings.kra_pin || "",
+            invoice_template: data.settings.invoice_template || "zoho_exact",
+            estimate_template: data.settings.estimate_template || "zoho_exact",
+            receipt_template: data.settings.receipt_template || "zoho_exact",
+            job_card_template: data.settings.job_card_template || "standard",
+            service_report_template: data.settings.service_report_template || "standard",
+            handover_template: data.settings.handover_template || "standard",
+            email_subject_template: data.settings.email_subject_template || "",
+            email_body_template: data.settings.email_body_template || "",
+            sms_body_template: data.settings.sms_body_template || "",
+            whatsapp_body_template: data.settings.whatsapp_body_template || "",
           });
         }
       })
@@ -85,7 +182,13 @@ const RepairsPage = () => {
   const [isSaving, setIsSaving] = useState(false);
 
   const updateSettingState = (key: string, value: boolean | string) => {
-    setSettings({ ...settings, [key]: value });
+    setSettings((prev) => ({ ...prev, [key]: value }));
+  };
+
+  const insertTag = (field: "email_body_template" | "sms_body_template" | "whatsapp_body_template", tag: string) => {
+    const cur = (settings as any)[field] || "";
+    const updated = cur + (cur.endsWith(" ") || !cur ? "" : " ") + tag;
+    updateSettingState(field, updated);
   };
 
   const saveSettings = async () => {
@@ -305,7 +408,27 @@ const RepairsPage = () => {
               : "text-ui-fg-subtle hover:text-ui-fg-base"
           }`}
         >
-          Tickets
+          Repair Tickets
+        </button>
+        <button
+          onClick={() => setActiveTab("templates")}
+          className={`pb-3 text-sm font-medium transition-colors ${
+            activeTab === "templates"
+              ? "border-b-2 border-ui-fg-base text-ui-fg-base"
+              : "text-ui-fg-subtle hover:text-ui-fg-base"
+          }`}
+        >
+          Document Templates
+        </button>
+        <button
+          onClick={() => setActiveTab("notifications")}
+          className={`pb-3 text-sm font-medium transition-colors ${
+            activeTab === "notifications"
+              ? "border-b-2 border-ui-fg-base text-ui-fg-base"
+              : "text-ui-fg-subtle hover:text-ui-fg-base"
+          }`}
+        >
+          Notification Templates
         </button>
         <button
           onClick={() => setActiveTab("settings")}
@@ -315,7 +438,7 @@ const RepairsPage = () => {
               : "text-ui-fg-subtle hover:text-ui-fg-base"
           }`}
         >
-          Settings
+          Settings & Integrations
         </button>
       </div>
       
@@ -659,50 +782,580 @@ const RepairsPage = () => {
       </div>
       )}
       
-      {activeTab === "settings" && (
-        <div className="flex flex-col gap-6 w-full max-w-2xl p-6">
-          <div>
-            <Heading level="h2">General Settings</Heading>
-            <div className="flex flex-col gap-4 mt-4">
-              <div className="flex flex-col gap-2">
-                <Text size="small" className="font-medium text-ui-fg-base">Company Name</Text>
-                <Text size="small" className="text-ui-fg-subtle">Displayed in notifications and SMS messages.</Text>
-                <Input 
-                  placeholder="e.g. Urban Device Care Ltd" 
-                  value={settings.company_name} 
-                  onChange={(e) => updateSettingState("company_name", e.target.value)} 
+      {/* ========================================================= */}
+      {/* TAB 2: DOCUMENT TEMPLATES & INTERACTIVE PREVIEWS           */}
+      {/* ========================================================= */}
+      {activeTab === "templates" && (
+        <div className="p-6 max-w-5xl flex flex-col gap-6">
+          <div className="flex flex-col gap-1">
+            <Heading level="h2" className="text-lg font-semibold">Document Templates & Live Previews</Heading>
+            <Text className="text-xs text-ui-fg-subtle">
+              Configure and preview all official customer and workshop documents. Zoho-backed documents match official Zoho Books layouts; non-Zoho workshop documents use dedicated professional formats with consistent company headers.
+            </Text>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            {/* 1. Repair Job Card */}
+            <div className="p-5 border border-ui-border-base rounded-lg bg-ui-bg-base flex flex-col justify-between shadow-sm">
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <div className="flex items-center gap-2">
+                    <span className="text-xl">📋</span>
+                    <Label className="font-semibold text-sm">Repair Job Card</Label>
+                  </div>
+                  <Badge color="blue" size="small">Workshop Intake</Badge>
+                </div>
+                <Text className="text-xs text-ui-fg-subtle mb-4">
+                  Customer intake job card featuring asset specifications, serial/IMEI, intake condition, checklist tasks, and dual technician/customer sign-off.
+                </Text>
+                <div className="flex flex-col gap-2">
+                  <Label className="text-xs font-medium">Template Style</Label>
+                  <Select
+                    value={settings.job_card_template || "standard"}
+                    onValueChange={(v) => updateSettingState("job_card_template", v)}
+                  >
+                    <Select.Trigger size="small">
+                      <Select.Value />
+                    </Select.Trigger>
+                    <Select.Content>
+                      <Select.Item value="standard">Standard Workshop Intake</Select.Item>
+                      <Select.Item value="modern">Modern Minimalist</Select.Item>
+                    </Select.Content>
+                  </Select>
+                </div>
+              </div>
+              <div className="mt-5 pt-3 border-t border-ui-border-base flex items-center justify-between">
+                <Text className="text-[11px] text-ui-fg-muted font-mono">Type: job_card</Text>
+                <Button
+                  variant="secondary"
+                  size="small"
+                  onClick={() => handlePreviewDocument("job_card", settings.job_card_template || "standard")}
+                  isLoading={previewLoading === "job_card"}
+                >
+                  <ArrowDownTray className="w-3.5 h-3.5 mr-1" /> Preview Job Card
+                </Button>
+              </div>
+            </div>
+
+            {/* 2. Service & Diagnostic Report */}
+            <div className="p-5 border border-ui-border-base rounded-lg bg-ui-bg-base flex flex-col justify-between shadow-sm">
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <div className="flex items-center gap-2">
+                    <span className="text-xl">🔬</span>
+                    <Label className="font-semibold text-sm">Service & Diagnostic Report</Label>
+                  </div>
+                  <Badge color="purple" size="small">Diagnostic Proposal</Badge>
+                </div>
+                <Text className="text-xs text-ui-fg-subtle mb-4">
+                  Technical diagnostic assessment featuring client device box, itemized scope & specifications table, diagnostics summary card, and long-term recommendations.
+                </Text>
+                <div className="flex flex-col gap-2">
+                  <Label className="text-xs font-medium">Template Style</Label>
+                  <Select
+                    value={settings.service_report_template || "standard"}
+                    onValueChange={(v) => updateSettingState("service_report_template", v)}
+                  >
+                    <Select.Trigger size="small">
+                      <Select.Value />
+                    </Select.Trigger>
+                    <Select.Content>
+                      <Select.Item value="standard">Standard Technical Report</Select.Item>
+                      <Select.Item value="modern">Modern Clean Proposal</Select.Item>
+                    </Select.Content>
+                  </Select>
+                </div>
+              </div>
+              <div className="mt-5 pt-3 border-t border-ui-border-base flex items-center justify-between">
+                <Text className="text-[11px] text-ui-fg-muted font-mono">Type: service_report</Text>
+                <Button
+                  variant="secondary"
+                  size="small"
+                  onClick={() => handlePreviewDocument("service_report", settings.service_report_template || "standard")}
+                  isLoading={previewLoading === "service_report"}
+                >
+                  <ArrowDownTray className="w-3.5 h-3.5 mr-1" /> Preview Service Report
+                </Button>
+              </div>
+            </div>
+
+            {/* 3. IT Asset Handover & Inspection Report */}
+            <div className="p-5 border border-ui-border-base rounded-lg bg-ui-bg-base flex flex-col justify-between shadow-sm">
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <div className="flex items-center gap-2">
+                    <span className="text-xl">🤝</span>
+                    <Label className="font-semibold text-sm">IT Asset Handover & Inspection</Label>
+                  </div>
+                  <Badge color="green" size="small">Custody Clearance</Badge>
+                </div>
+                <Text className="text-xs text-ui-fg-subtle mb-4">
+                  Official clearance certificate with 2x2 device specs grid, 6-point hardware QA checklist, technician clearance verdict card, and receiving officer stamp.
+                </Text>
+                <div className="flex flex-col gap-2">
+                  <Label className="text-xs font-medium">Template Style</Label>
+                  <Select
+                    value={settings.handover_template || "standard"}
+                    onValueChange={(v) => updateSettingState("handover_template", v)}
+                  >
+                    <Select.Trigger size="small">
+                      <Select.Value />
+                    </Select.Trigger>
+                    <Select.Content>
+                      <Select.Item value="standard">Standard Custody Handover</Select.Item>
+                      <Select.Item value="modern">Corporate Clearance</Select.Item>
+                    </Select.Content>
+                  </Select>
+                </div>
+              </div>
+              <div className="mt-5 pt-3 border-t border-ui-border-base flex items-center justify-between">
+                <Text className="text-[11px] text-ui-fg-muted font-mono">Type: handover</Text>
+                <Button
+                  variant="secondary"
+                  size="small"
+                  onClick={() => handlePreviewDocument("handover", settings.handover_template || "standard")}
+                  isLoading={previewLoading === "handover"}
+                >
+                  <ArrowDownTray className="w-3.5 h-3.5 mr-1" /> Preview Handover Report
+                </Button>
+              </div>
+            </div>
+
+            {/* 4. Tax Invoice (Zoho-Exact) */}
+            <div className="p-5 border border-ui-border-base rounded-lg bg-ui-bg-base flex flex-col justify-between shadow-sm">
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <div className="flex items-center gap-2">
+                    <span className="text-xl">🧾</span>
+                    <Label className="font-semibold text-sm">Tax Invoice</Label>
+                  </div>
+                  <Badge color="orange" size="small">Zoho Exact</Badge>
+                </div>
+                <Text className="text-xs text-ui-fg-subtle mb-4">
+                  Official invoice matching Zoho Books layout with itemized parts & labor, balance due highlight, online payment shortlink, QR tracking, and KRA PIN.
+                </Text>
+                <div className="flex flex-col gap-2">
+                  <Label className="text-xs font-medium">Template Style</Label>
+                  <Select
+                    value={settings.invoice_template || "zoho_exact"}
+                    onValueChange={(v) => updateSettingState("invoice_template", v)}
+                  >
+                    <Select.Trigger size="small">
+                      <Select.Value />
+                    </Select.Trigger>
+                    <Select.Content>
+                      <Select.Item value="zoho_exact">Zoho Books Exact Format</Select.Item>
+                      <Select.Item value="modern">Modern Clean Layout</Select.Item>
+                    </Select.Content>
+                  </Select>
+                </div>
+              </div>
+              <div className="mt-5 pt-3 border-t border-ui-border-base flex items-center justify-between">
+                <Text className="text-[11px] text-ui-fg-muted font-mono">Type: invoice</Text>
+                <Button
+                  variant="secondary"
+                  size="small"
+                  onClick={() => handlePreviewDocument("invoice", settings.invoice_template || "zoho_exact")}
+                  isLoading={previewLoading === "invoice"}
+                >
+                  <ArrowDownTray className="w-3.5 h-3.5 mr-1" /> Preview Tax Invoice
+                </Button>
+              </div>
+            </div>
+
+            {/* 5. Repair Estimate / Quotation (Zoho-Exact) */}
+            <div className="p-5 border border-ui-border-base rounded-lg bg-ui-bg-base flex flex-col justify-between shadow-sm">
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <div className="flex items-center gap-2">
+                    <span className="text-xl">💼</span>
+                    <Label className="font-semibold text-sm">Repair Estimate / Quotation</Label>
+                  </div>
+                  <Badge color="orange" size="small">Zoho Exact</Badge>
+                </div>
+                <Text className="text-xs text-ui-fg-subtle mb-4">
+                  Itemized repair quotation matching Zoho Books with 14-day validity period, customer approval links, and workshop labor breakdown.
+                </Text>
+                <div className="flex flex-col gap-2">
+                  <Label className="text-xs font-medium">Template Style</Label>
+                  <Select
+                    value={settings.estimate_template || "zoho_exact"}
+                    onValueChange={(v) => updateSettingState("estimate_template", v)}
+                  >
+                    <Select.Trigger size="small">
+                      <Select.Value />
+                    </Select.Trigger>
+                    <Select.Content>
+                      <Select.Item value="zoho_exact">Zoho Books Exact Format</Select.Item>
+                      <Select.Item value="modern">Modern Clean Layout</Select.Item>
+                    </Select.Content>
+                  </Select>
+                </div>
+              </div>
+              <div className="mt-5 pt-3 border-t border-ui-border-base flex items-center justify-between">
+                <Text className="text-[11px] text-ui-fg-muted font-mono">Type: quote</Text>
+                <Button
+                  variant="secondary"
+                  size="small"
+                  onClick={() => handlePreviewDocument("quote", settings.estimate_template || "zoho_exact")}
+                  isLoading={previewLoading === "quote"}
+                >
+                  <ArrowDownTray className="w-3.5 h-3.5 mr-1" /> Preview Estimate
+                </Button>
+              </div>
+            </div>
+
+            {/* 6. Payment Receipt (Zoho-Exact) */}
+            <div className="p-5 border border-ui-border-base rounded-lg bg-ui-bg-base flex flex-col justify-between shadow-sm">
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <div className="flex items-center gap-2">
+                    <span className="text-xl">💳</span>
+                    <Label className="font-semibold text-sm">Payment Receipt</Label>
+                  </div>
+                  <Badge color="orange" size="small">Zoho Exact</Badge>
+                </div>
+                <Text className="text-xs text-ui-fg-subtle mb-4">
+                  Official payment receipt issued upon payment capture with green PAID watermark stamp, payment reference, and receipt details matching Zoho Books.
+                </Text>
+                <div className="flex flex-col gap-2">
+                  <Label className="text-xs font-medium">Template Style</Label>
+                  <Select
+                    value={settings.receipt_template || "zoho_exact"}
+                    onValueChange={(v) => updateSettingState("receipt_template", v)}
+                  >
+                    <Select.Trigger size="small">
+                      <Select.Value />
+                    </Select.Trigger>
+                    <Select.Content>
+                      <Select.Item value="zoho_exact">Zoho Books Exact Format</Select.Item>
+                      <Select.Item value="modern">Modern Clean Layout</Select.Item>
+                    </Select.Content>
+                  </Select>
+                </div>
+              </div>
+              <div className="mt-5 pt-3 border-t border-ui-border-base flex items-center justify-between">
+                <Text className="text-[11px] text-ui-fg-muted font-mono">Type: receipt</Text>
+                <Button
+                  variant="secondary"
+                  size="small"
+                  onClick={() => handlePreviewDocument("receipt", settings.receipt_template || "zoho_exact")}
+                  isLoading={previewLoading === "receipt"}
+                >
+                  <ArrowDownTray className="w-3.5 h-3.5 mr-1" /> Preview Payment Receipt
+                </Button>
+              </div>
+            </div>
+          </div>
+
+          <div className="flex justify-end mt-4">
+            <Button variant="primary" onClick={saveSettings} isLoading={isSaving}>
+              Save Template Choices
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================= */}
+      {/* TAB 3: NOTIFICATION TEMPLATES & CHANNELS                  */}
+      {/* ========================================================= */}
+      {activeTab === "notifications" && (
+        <div className="p-6 max-w-4xl flex flex-col gap-6">
+          <div className="flex flex-col gap-1">
+            <Heading level="h2" className="text-lg font-semibold">Customizable Notification Message Templates</Heading>
+            <Text className="text-xs text-ui-fg-subtle">
+              Configure message templates and channel rules dispatched across Email, SMS, and WhatsApp. Click on any merge tag below each editor to insert dynamic placeholders.
+            </Text>
+          </div>
+
+          {/* Best Practices Banner */}
+          <div className="p-4 bg-ui-bg-subtle border border-ui-border-base rounded-lg flex flex-col gap-2">
+            <div className="flex items-center gap-2 text-ui-fg-interactive font-medium text-xs">
+              <Sparkles className="w-4 h-4" />
+              <span>Smart Milestone Dispatch Policy</span>
+            </div>
+            <ul className="text-xs text-ui-fg-subtle list-disc list-inside space-y-1">
+              <li><strong>Customer Milestones:</strong> Notifications are pushed exclusively on true milestones (<code className="text-[11px] bg-ui-bg-base px-1 py-0.5 rounded">received</code>, <code className="text-[11px] bg-ui-bg-base px-1 py-0.5 rounded">awaiting_approval</code>, <code className="text-[11px] bg-ui-bg-base px-1 py-0.5 rounded">ready</code>, <code className="text-[11px] bg-ui-bg-base px-1 py-0.5 rounded">completed</code>, <code className="text-[11px] bg-ui-bg-base px-1 py-0.5 rounded">cancelled</code>).</li>
+              <li><strong>Zero Bench Spam:</strong> Internal workshop operations (<code className="text-[11px] bg-ui-bg-base px-1 py-0.5 rounded">diagnosing</code>, <code className="text-[11px] bg-ui-bg-base px-1 py-0.5 rounded">repairing</code>) do NOT send customer notifications.</li>
+              <li><strong>SMS Cost Protection:</strong> SMS messages are strictly restricted to customer action milestones (<code className="text-[11px] bg-ui-bg-base px-1 py-0.5 rounded">awaiting_approval</code>, <code className="text-[11px] bg-ui-bg-base px-1 py-0.5 rounded">ready</code>, <code className="text-[11px] bg-ui-bg-base px-1 py-0.5 rounded">cancelled</code>).</li>
+              <li><strong>WhatsApp Safety:</strong> WhatsApp is disabled by default to prevent unhandled provider errors in Medusa.</li>
+            </ul>
+          </div>
+
+          {/* Channel Switches */}
+          <div className="p-4 border border-ui-border-base rounded-lg bg-ui-bg-base flex flex-col gap-4">
+            <Label className="font-semibold text-sm">Active Channels</Label>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div className="flex items-center justify-between p-3 border border-ui-border-base rounded bg-ui-bg-subtle">
+                <div>
+                  <Label className="font-medium text-xs">Email Channel</Label>
+                  <Text className="text-[11px] text-ui-fg-muted">Responsive HTML emails</Text>
+                </div>
+                <Switch
+                  checked={settings.email_notifications_enabled}
+                  onCheckedChange={(v) => updateSettingState("email_notifications_enabled", v)}
                 />
               </div>
-              <div className="flex flex-col gap-2 mt-2">
+
+              <div className="flex items-center justify-between p-3 border border-ui-border-base rounded bg-ui-bg-subtle">
+                <div>
+                  <Label className="font-medium text-xs">SMS Channel</Label>
+                  <Text className="text-[11px] text-ui-fg-muted">Action-required SMS only</Text>
+                </div>
+                <Switch
+                  checked={settings.sms_notifications_enabled}
+                  onCheckedChange={(v) => updateSettingState("sms_notifications_enabled", v)}
+                />
+              </div>
+
+              <div className="flex items-center justify-between p-3 border border-ui-border-base rounded bg-ui-bg-subtle">
+                <div>
+                  <Label className="font-medium text-xs">WhatsApp Channel</Label>
+                  <Text className="text-[11px] text-ui-fg-muted">Off by default</Text>
+                </div>
+                <Switch
+                  checked={settings.whatsapp_notifications_enabled}
+                  onCheckedChange={(v) => updateSettingState("whatsapp_notifications_enabled", v)}
+                />
+              </div>
+            </div>
+          </div>
+
+          {/* 1. Email Template Card */}
+          <div className="p-5 border border-ui-border-base rounded-lg bg-ui-bg-base flex flex-col gap-4 shadow-sm">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Envelope className="w-4 h-4 text-ui-fg-interactive" />
+                <Label className="font-semibold text-sm">Email Notification Customizer</Label>
+              </div>
+              <Button
+                variant="secondary"
+                size="small"
+                onClick={() => {
+                  updateSettingState("email_subject_template", "");
+                  updateSettingState("email_body_template", "");
+                }}
+              >
+                Reset to Default
+              </Button>
+            </div>
+
+            <div>
+              <Label className="text-xs font-medium">Email Subject Template</Label>
+              <Input
+                value={settings.email_subject_template || ""}
+                onChange={(e) => updateSettingState("email_subject_template", e.target.value)}
+                placeholder="{company_name}: Repair Status Update - {device} (#{ticket_number})"
+                size="small"
+                className="mt-1 font-mono text-xs"
+              />
+              <Text className="text-[11px] text-ui-fg-muted mt-1">
+                Default: <code>&#123;company_name&#125;: Repair Status Update - &#123;device&#125; (#&#123;ticket_number&#125;)</code>
+              </Text>
+            </div>
+
+            <div>
+              <div className="flex items-center justify-between mb-1">
+                <Label className="text-xs font-medium">Email Body Template (HTML / Text)</Label>
+                <div className="flex flex-wrap gap-1">
+                  {[
+                    "{customer_name}",
+                    "{ticket_number}",
+                    "{device}",
+                    "{status}",
+                    "{total_estimate}",
+                    "{approval_url}",
+                    "{pdf_url}",
+                    "{company_name}",
+                    "{payment_button}",
+                    "{download_button}",
+                  ].map((tag) => (
+                    <button
+                      key={tag}
+                      type="button"
+                      onClick={() => insertTag("email_body_template", tag)}
+                      className="text-[10px] px-1.5 py-0.5 rounded bg-ui-bg-subtle hover:bg-ui-bg-subtle-hover text-ui-fg-subtle border border-ui-border-base font-mono cursor-pointer transition-colors"
+                    >
+                      +{tag}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <Textarea
+                value={settings.email_body_template || ""}
+                onChange={(e) => updateSettingState("email_body_template", e.target.value)}
+                placeholder={`<p>Dear <strong>{customer_name}</strong>,</p>\n<p>Your repair ticket <strong>#{ticket_number}</strong> for <strong>{device}</strong> is now: <strong>{status}</strong>.</p>\n<p>Estimated Cost: <strong>{total_estimate}</strong></p>\n{payment_button}\n{download_button}\n<p>Best regards,<br/><strong>{company_name}</strong></p>`}
+                rows={5}
+                className="font-mono text-xs"
+              />
+              <Text className="text-[11px] text-ui-fg-muted mt-1">
+                Leave blank to use default responsive branded layout with action buttons and summary card.
+              </Text>
+            </div>
+          </div>
+
+          {/* 2. SMS Template Card */}
+          <div className="p-5 border border-ui-border-base rounded-lg bg-ui-bg-base flex flex-col gap-4 shadow-sm">
+            <div className="flex items-center justify-between">
+              <Label className="font-semibold text-sm">SMS Message Body Template</Label>
+              <Button
+                variant="secondary"
+                size="small"
+                onClick={() => updateSettingState("sms_body_template", "")}
+              >
+                Reset to Default
+              </Button>
+            </div>
+
+            <div>
+              <div className="flex items-center justify-between mb-1">
+                <Label className="text-xs font-medium">SMS Body Text</Label>
+                <div className="flex flex-wrap gap-1">
+                  {[
+                    "{customer_name}",
+                    "{ticket_number}",
+                    "{device}",
+                    "{status}",
+                    "{total_estimate}",
+                    "{short_approval_url}",
+                    "{short_pdf_url}",
+                    "{company_name}",
+                  ].map((tag) => (
+                    <button
+                      key={tag}
+                      type="button"
+                      onClick={() => insertTag("sms_body_template", tag)}
+                      className="text-[10px] px-1.5 py-0.5 rounded bg-ui-bg-subtle hover:bg-ui-bg-subtle-hover text-ui-fg-subtle border border-ui-border-base font-mono cursor-pointer transition-colors"
+                    >
+                      +{tag}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <Textarea
+                value={settings.sms_body_template || ""}
+                onChange={(e) => updateSettingState("sms_body_template", e.target.value)}
+                placeholder="[{company_name}] Hi {customer_name}, repair #{ticket_number} ({device}) is: {status}. Cost: {total_estimate}. Action/Track: {short_approval_url}"
+                rows={3}
+                className="font-mono text-xs"
+              />
+              <Text className="text-[11px] text-ui-fg-muted mt-1">
+                Leave blank to use concise default: <code>[&#123;company_name&#125;] Hi &#123;customer_name&#125;, your repair #&#123;ticket_number&#125; (&#123;device&#125;) is: &#123;status&#125;...</code>
+              </Text>
+            </div>
+          </div>
+
+          {/* 3. WhatsApp Template Card */}
+          <div className="p-5 border border-ui-border-base rounded-lg bg-ui-bg-base flex flex-col gap-4 shadow-sm">
+            <div className="flex items-center justify-between">
+              <Label className="font-semibold text-sm">WhatsApp Message Body Template</Label>
+              <Button
+                variant="secondary"
+                size="small"
+                onClick={() => updateSettingState("whatsapp_body_template", "")}
+              >
+                Reset to Default
+              </Button>
+            </div>
+
+            <div>
+              <div className="flex items-center justify-between mb-1">
+                <Label className="text-xs font-medium">WhatsApp Body Text</Label>
+                <div className="flex flex-wrap gap-1">
+                  {[
+                    "{customer_name}",
+                    "{ticket_number}",
+                    "{device}",
+                    "{status}",
+                    "{total_estimate}",
+                    "{approval_url}",
+                    "{pdf_url}",
+                    "{company_name}",
+                  ].map((tag) => (
+                    <button
+                      key={tag}
+                      type="button"
+                      onClick={() => insertTag("whatsapp_body_template", tag)}
+                      className="text-[10px] px-1.5 py-0.5 rounded bg-ui-bg-subtle hover:bg-ui-bg-subtle-hover text-ui-fg-subtle border border-ui-border-base font-mono cursor-pointer transition-colors"
+                    >
+                      +{tag}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <Textarea
+                value={settings.whatsapp_body_template || ""}
+                onChange={(e) => updateSettingState("whatsapp_body_template", e.target.value)}
+                placeholder="*[{company_name}]* Hi {customer_name}, repair #{ticket_number} ({device}) is: *{status}*.\nEstimate: {total_estimate}\nTrack progress: {approval_url}"
+                rows={3}
+                className="font-mono text-xs"
+              />
+            </div>
+          </div>
+
+          <div className="flex justify-end mt-4">
+            <Button variant="primary" onClick={saveSettings} isLoading={isSaving}>
+              Save Notification Templates
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================= */}
+      {/* TAB 4: GENERAL SETTINGS, BRANDING & INTEGRATIONS           */}
+      {/* ========================================================= */}
+      {activeTab === "settings" && (
+        <div className="flex flex-col gap-6 w-full max-w-3xl p-6">
+          <div>
+            <Heading level="h2">General & PDF Header Branding</Heading>
+            <Text className="text-ui-fg-subtle text-xs">
+              These details are printed across the consistent header on all Job Cards, Invoices, Service Reports, Estimates, and Handover Reports.
+            </Text>
+            <div className="flex flex-col gap-4 mt-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="flex flex-col gap-2">
+                  <Text size="small" className="font-medium text-ui-fg-base">Company Name</Text>
+                  <Input 
+                    placeholder="e.g. Urban Device Care Ltd" 
+                    value={settings.company_name} 
+                    onChange={(e) => updateSettingState("company_name", e.target.value)} 
+                  />
+                </div>
+                <div className="flex flex-col gap-2">
+                  <Text size="small" className="font-medium text-ui-fg-base">KRA PIN / Tax ID</Text>
+                  <Input 
+                    placeholder="e.g. P052534849N" 
+                    value={settings.kra_pin || ""} 
+                    onChange={(e) => updateSettingState("kra_pin", e.target.value)} 
+                  />
+                </div>
+              </div>
+
+              <div className="flex flex-col gap-2">
                 <Text size="small" className="font-medium text-ui-fg-base">Storefront URL</Text>
-                <Text size="small" className="text-ui-fg-subtle">Base URL for tracking links (e.g. http://localhost:8000).</Text>
+                <Text size="small" className="text-ui-fg-subtle">Base URL for customer tracking links & online payment.</Text>
                 <Input 
-                  placeholder="e.g. https://store.example.com" 
+                  placeholder="e.g. https://store.urbandevicecare.co.uk" 
                   value={settings.storefront_url} 
                   onChange={(e) => updateSettingState("storefront_url", e.target.value)} 
                 />
               </div>
-            </div>
-            <div className="border-b border-ui-border-base my-6" />
-          </div>
 
-          <div>
-            <Heading level="h2">PDF Document Settings</Heading>
-            <div className="flex flex-col gap-4 mt-4">
               <div className="flex flex-col gap-2">
                 <Text size="small" className="font-medium text-ui-fg-base">Logo URL</Text>
-                <Text size="small" className="text-ui-fg-subtle">Enter an image URL for your company logo (e.g. https://example.com/logo.png).</Text>
+                <Text size="small" className="text-ui-fg-subtle">Image URL for company logo (falls back to default logo asset if empty).</Text>
                 <Input 
-                  placeholder="https://..." 
+                  placeholder="https://example.com/logo.png" 
                   value={settings.pdf_logo_url || ""} 
                   onChange={(e) => updateSettingState("pdf_logo_url", e.target.value)} 
                 />
               </div>
+
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div className="flex flex-col gap-2">
-                  <Text size="small" className="font-medium text-ui-fg-base">Address</Text>
+                  <Text size="small" className="font-medium text-ui-fg-base">Physical Address</Text>
                   <Textarea 
-                    placeholder="e.g. Nairobi, Kenya" 
+                    placeholder="Bekim House, Westlands Crossway Road&#10;Nairobi 00800, Kenya" 
                     value={settings.pdf_address || ""} 
                     onChange={(e) => updateSettingState("pdf_address", e.target.value)} 
                     rows={2}
@@ -711,95 +1364,65 @@ const RepairsPage = () => {
                 <div className="flex flex-col gap-2">
                   <Text size="small" className="font-medium text-ui-fg-base">Phone Numbers</Text>
                   <Input 
-                    placeholder="e.g. 0729436660 / 0794700241" 
+                    placeholder="0729436660 / 0794700241" 
                     value={settings.pdf_phone || ""} 
                     onChange={(e) => updateSettingState("pdf_phone", e.target.value)} 
                   />
                 </div>
                 <div className="flex flex-col gap-2">
-                  <Text size="small" className="font-medium text-ui-fg-base">Email</Text>
+                  <Text size="small" className="font-medium text-ui-fg-base">Email Address</Text>
                   <Input 
-                    placeholder="e.g. info@company.com" 
+                    placeholder="info@urbandevicecare.co.uk" 
                     value={settings.pdf_email || ""} 
                     onChange={(e) => updateSettingState("pdf_email", e.target.value)} 
                   />
                 </div>
                 <div className="flex flex-col gap-2">
-                  <Text size="small" className="font-medium text-ui-fg-base">Website</Text>
+                  <Text size="small" className="font-medium text-ui-fg-base">Website URL</Text>
                   <Input 
-                    placeholder="e.g. www.company.com" 
+                    placeholder="urbandevicecare.co.uk" 
                     value={settings.pdf_website || ""} 
                     onChange={(e) => updateSettingState("pdf_website", e.target.value)} 
                   />
                 </div>
               </div>
+
               <div className="flex flex-col gap-2 mt-2">
-                <Text size="small" className="font-medium text-ui-fg-base">Payment Details</Text>
-                <Text size="small" className="text-ui-fg-subtle">Bank account info, MPESA till number, or instructions to print on invoices.</Text>
+                <Text size="small" className="font-medium text-ui-fg-base">Payment Details (Footer Instructions)</Text>
+                <Text size="small" className="text-ui-fg-subtle">Bank account info, MPESA Paybill number, or instructions to print on invoices.</Text>
                 <Textarea 
-                  placeholder="Account Name: Urban Device Care..." 
+                  placeholder="Thanks for your business. | Paybill: 880100 - Acc No: PAYURBANDEVICE" 
                   value={settings.pdf_payment_details || ""} 
                   onChange={(e) => updateSettingState("pdf_payment_details", e.target.value)} 
-                  rows={3}
+                  rows={2}
                 />
               </div>
+
               <div className="flex flex-col gap-2 mt-2">
                 <Text size="small" className="font-medium text-ui-fg-base">Terms & Conditions</Text>
-                <Text size="small" className="text-ui-fg-subtle">Legal text, warranty disclaimers, or terms to print at the bottom of Job Cards and Quotes.</Text>
+                <Text size="small" className="text-ui-fg-subtle">Warranty terms and disclaimers printed at the bottom of Invoices and Estimates.</Text>
                 <Textarea 
-                  placeholder="1. All repairs come with a 90-day warranty..." 
+                  placeholder="All repairs come with our comprehensive 90-day workshop warranty on OEM components and labor." 
                   value={settings.pdf_terms || ""} 
                   onChange={(e) => updateSettingState("pdf_terms", e.target.value)} 
-                  rows={4}
+                  rows={3}
                 />
               </div>
             </div>
             <div className="border-b border-ui-border-base my-6" />
           </div>
 
-          <div>
-            <Heading level="h2">Notification Settings</Heading>
-            <Text className="text-ui-fg-subtle">
-              Configure which channels are enabled for automated repair notifications. (Note: Medusa must have a provider configured for these channels to actually send them).
-            </Text>
-            <div className="flex flex-col gap-y-6 mt-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <Label className="font-semibold">Email Notifications</Label>
-                  <Text className="text-sm text-ui-fg-subtle">Send status updates and payment links to customers via Email.</Text>
-                </div>
-                <Switch checked={settings.email_notifications_enabled} onCheckedChange={(v) => updateSettingState("email_notifications_enabled", v)} />
-              </div>
-              <div className="flex items-center justify-between">
-                <div>
-                  <Label className="font-semibold">SMS Notifications</Label>
-                  <Text className="text-sm text-ui-fg-subtle">Send status updates and payment links to customers via SMS.</Text>
-                </div>
-                <Switch checked={settings.sms_notifications_enabled} onCheckedChange={(v) => updateSettingState("sms_notifications_enabled", v)} />
-              </div>
-              <div className="flex items-center justify-between">
-                <div>
-                  <Label className="font-semibold">WhatsApp Notifications</Label>
-                  <Text className="text-sm text-ui-fg-subtle">Send status updates and payment links to customers via WhatsApp.</Text>
-                </div>
-                <Switch checked={settings.whatsapp_notifications_enabled} onCheckedChange={(v) => updateSettingState("whatsapp_notifications_enabled", v)} />
-              </div>
-            </div>
-          </div>
-
-          <hr className="my-8" />
-          
-          <div className="flex flex-col gap-y-6 max-w-2xl">
+          <div className="flex flex-col gap-y-6">
             <Heading level="h2">Zoho Books Integration</Heading>
-            <Text className="text-ui-fg-subtle">
-              Configure Zoho Books to automatically sync Repair Tickets as Estimates and Invoices.
+            <Text className="text-ui-fg-subtle text-xs">
+              Configure Zoho Books to sync Repair Tickets as Estimates and Invoices.
             </Text>
             
-            <div className="flex flex-col gap-y-6 mt-4">
+            <div className="flex flex-col gap-y-6 mt-2">
               <div className="flex items-center justify-between">
                 <div>
                   <Label className="font-semibold">Enable Zoho Books Sync</Label>
-                  <Text className="text-sm text-ui-fg-subtle">Replaces local PDF generation with official Zoho Books documents.</Text>
+                  <Text className="text-xs text-ui-fg-subtle">Official Zoho Books documents for Invoices, Estimates & Receipts.</Text>
                 </div>
                 <Switch checked={settings.zoho_books_enabled} onCheckedChange={(v) => updateSettingState("zoho_books_enabled", v)} />
               </div>
@@ -807,12 +1430,12 @@ const RepairsPage = () => {
               {settings.zoho_books_enabled && (
                 <div className="flex flex-col gap-y-4 p-4 border border-ui-border-base rounded-lg bg-ui-bg-subtle">
                   <div className="flex flex-col gap-y-2">
-                    <Label>Zoho Data Center (Domain)</Label>
+                    <Label className="text-xs">Zoho Data Center (Domain)</Label>
                     <Select 
                       value={settings.zoho_domain} 
                       onValueChange={(v) => updateSettingState("zoho_domain", v)}
                     >
-                      <Select.Trigger>
+                      <Select.Trigger size="small">
                         <Select.Value placeholder="Select Data Center" />
                       </Select.Trigger>
                       <Select.Content>
@@ -825,7 +1448,7 @@ const RepairsPage = () => {
                     </Select>
                   </div>
                   <div className="flex flex-col gap-y-2">
-                    <Label>Organization ID</Label>
+                    <Label className="text-xs">Organization ID</Label>
                     <Input 
                       placeholder="e.g. 12345678" 
                       value={settings.zoho_organization_id} 
@@ -833,7 +1456,7 @@ const RepairsPage = () => {
                     />
                   </div>
                   <div className="flex flex-col gap-y-2">
-                    <Label>Client ID</Label>
+                    <Label className="text-xs">Client ID</Label>
                     <Input 
                       placeholder="1000.XXXXXXXXXXXXXXXXXXXXXXXX" 
                       value={settings.zoho_client_id} 
@@ -841,7 +1464,7 @@ const RepairsPage = () => {
                     />
                   </div>
                   <div className="flex flex-col gap-y-2">
-                    <Label>Client Secret</Label>
+                    <Label className="text-xs">Client Secret</Label>
                     <Input 
                       placeholder="Enter Client Secret" 
                       type="password"
@@ -850,7 +1473,7 @@ const RepairsPage = () => {
                     />
                   </div>
                   <div className="flex flex-col gap-y-2">
-                    <Label>Refresh Token</Label>
+                    <Label className="text-xs">Refresh Token</Label>
                     <Input 
                       placeholder="1000.XXXXXXXXXXXXXXXXXXXXXXXX" 
                       type="password"
@@ -863,19 +1486,19 @@ const RepairsPage = () => {
             </div>
           </div>
 
-          <hr className="my-8" />
+          <hr className="my-6" />
           
-          <div className="flex flex-col gap-y-6 max-w-2xl">
+          <div className="flex flex-col gap-y-6">
             <Heading level="h2">Paystack Integration</Heading>
-            <Text className="text-ui-fg-subtle">
-              Configure Paystack to generate payment links for repairs.
+            <Text className="text-ui-fg-subtle text-xs">
+              Configure Paystack to generate instant online payment links for repairs.
             </Text>
             
-            <div className="flex flex-col gap-y-6 mt-4">
+            <div className="flex flex-col gap-y-6 mt-2">
               <div className="flex items-center justify-between">
                 <div>
                   <Label className="font-semibold">Enable Paystack Checkout</Label>
-                  <Text className="text-sm text-ui-fg-subtle">Generate Paystack checkout links on approved tickets.</Text>
+                  <Text className="text-xs text-ui-fg-subtle">Generate Paystack checkout links on approved tickets.</Text>
                 </div>
                 <Switch checked={settings.paystack_enabled} onCheckedChange={(v) => updateSettingState("paystack_enabled", v)} />
               </div>
@@ -883,7 +1506,7 @@ const RepairsPage = () => {
               {settings.paystack_enabled && (
                 <div className="flex flex-col gap-y-4 p-4 border border-ui-border-base rounded-lg bg-ui-bg-subtle">
                   <div className="flex flex-col gap-y-2">
-                    <Label>Public Key</Label>
+                    <Label className="text-xs">Public Key</Label>
                     <Input 
                       placeholder="pk_test_..." 
                       value={settings.paystack_public_key} 
@@ -891,7 +1514,7 @@ const RepairsPage = () => {
                     />
                   </div>
                   <div className="flex flex-col gap-y-2">
-                    <Label>Secret Key</Label>
+                    <Label className="text-xs">Secret Key</Label>
                     <Input 
                       placeholder="sk_test_..." 
                       type="password"
@@ -906,10 +1529,130 @@ const RepairsPage = () => {
 
           <div className="flex justify-end mt-4">
             <Button variant="primary" onClick={saveSettings} isLoading={isSaving}>
-              Save Settings
+              Save All Settings
             </Button>
           </div>
         </div>
+      )}
+
+      {/* ========================================================= */}
+      {/* LIVE TEMPLATE PREVIEW MODAL                                */}
+      {/* ========================================================= */}
+      {previewModalOpen && (
+        <FocusModal open={previewModalOpen} onOpenChange={setPreviewModalOpen}>
+          <FocusModal.Content>
+            <FocusModal.Header className="flex items-center justify-between px-6 py-4">
+              <div className="flex items-center gap-3">
+                <DocumentText className="w-5 h-5 text-ui-fg-interactive" />
+                <Heading level="h2" className="text-base font-semibold">
+                  Template Live Preview
+                </Heading>
+                <Badge color="blue" size="small">
+                  {previewType.toUpperCase()}
+                </Badge>
+                <Badge color="grey" size="small">
+                  {previewStyle.toUpperCase()}
+                </Badge>
+              </div>
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="secondary"
+                  size="small"
+                  onClick={handleOpenPreviewNewTab}
+                >
+                  Open in New Window
+                </Button>
+                <Button
+                  variant="secondary"
+                  size="small"
+                  onClick={handleDownloadPreview}
+                  disabled={!previewBlobUrl}
+                >
+                  <ArrowDownTray className="w-3.5 h-3.5 mr-1" />
+                  Download PDF
+                </Button>
+                <Button
+                  variant="secondary"
+                  size="small"
+                  onClick={() => setPreviewModalOpen(false)}
+                >
+                  Close
+                </Button>
+              </div>
+            </FocusModal.Header>
+            <FocusModal.Body className="p-6 flex flex-col gap-4 max-w-5xl mx-auto h-[82vh]">
+              {/* Document Switcher Toolbar */}
+              <div className="flex flex-wrap items-center justify-between gap-4 p-3 bg-ui-bg-subtle border border-ui-border-base rounded-lg">
+                <div className="flex items-center gap-3">
+                  <Label className="text-xs font-medium">Document Type:</Label>
+                  <Select value={previewType} onValueChange={(v) => switchPreview(v, previewStyle)}>
+                    <Select.Trigger size="small" className="w-[220px]">
+                      <Select.Value />
+                    </Select.Trigger>
+                    <Select.Content>
+                      <Select.Item value="job_card">📋 Repair Job Card</Select.Item>
+                      <Select.Item value="service_report">🔬 Service & Diagnostic Report</Select.Item>
+                      <Select.Item value="handover">🤝 IT Asset Handover & Inspection</Select.Item>
+                      <Select.Item value="invoice">🧾 Tax Invoice (Zoho Exact)</Select.Item>
+                      <Select.Item value="quote">💼 Repair Estimate (Zoho Exact)</Select.Item>
+                      <Select.Item value="receipt">💳 Payment Receipt (Zoho Exact)</Select.Item>
+                    </Select.Content>
+                  </Select>
+                </div>
+
+                <div className="flex items-center gap-3">
+                  <Label className="text-xs font-medium">Layout Style:</Label>
+                  <Select value={previewStyle} onValueChange={(v) => switchPreview(previewType, v)}>
+                    <Select.Trigger size="small" className="w-[180px]">
+                      <Select.Value />
+                    </Select.Trigger>
+                    <Select.Content>
+                      <Select.Item value="standard">Standard Format</Select.Item>
+                      <Select.Item value="zoho_exact">Zoho Exact Format</Select.Item>
+                      <Select.Item value="modern">Modern Clean</Select.Item>
+                    </Select.Content>
+                  </Select>
+                </div>
+
+                <Button
+                  variant="secondary"
+                  size="small"
+                  onClick={() => switchPreview(previewType, previewStyle)}
+                  isLoading={isPreviewModalLoading}
+                >
+                  <ArrowPath className="w-3.5 h-3.5 mr-1" /> Refresh
+                </Button>
+              </div>
+
+              {/* PDF Viewer Iframe */}
+              <div className="flex-1 w-full bg-ui-bg-subtle border border-ui-border-base rounded-lg overflow-hidden flex items-center justify-center relative min-h-[500px]">
+                {isPreviewModalLoading ? (
+                  <div className="flex flex-col items-center gap-3 text-ui-fg-subtle">
+                    <ArrowPath className="w-6 h-6 animate-spin text-ui-fg-interactive" />
+                    <Text className="text-xs">Rendering live template preview...</Text>
+                  </div>
+                ) : previewBlobUrl ? (
+                  <iframe
+                    src={previewBlobUrl}
+                    className="w-full h-full border-0 rounded-lg"
+                    title="Live Template Preview"
+                  />
+                ) : (
+                  <div className="flex flex-col items-center gap-2 text-ui-fg-error">
+                    <Text className="text-xs font-medium">Failed to generate PDF preview.</Text>
+                    <Button
+                      variant="secondary"
+                      size="small"
+                      onClick={() => switchPreview(previewType, previewStyle)}
+                    >
+                      Retry Preview
+                    </Button>
+                  </div>
+                )}
+              </div>
+            </FocusModal.Body>
+          </FocusModal.Content>
+        </FocusModal>
       )}
     </Container>
   );

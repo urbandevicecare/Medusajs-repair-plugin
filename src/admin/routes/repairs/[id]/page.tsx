@@ -552,6 +552,12 @@ const RepairDetailPage = () => {
             <a href={`/admin/repairs/${id}/document?type=job_card`} target="_blank" className="text-[11px] uppercase tracking-wider font-semibold text-ui-fg-subtle hover:text-ui-fg-base transition-colors">
               Job Card
             </a>
+            <a href={`/admin/repairs/${id}/document?type=service_report`} target="_blank" className="text-[11px] uppercase tracking-wider font-semibold text-ui-fg-subtle hover:text-ui-fg-base transition-colors">
+              Service Report
+            </a>
+            <a href={`/admin/repairs/${id}/document?type=handover`} target="_blank" className="text-[11px] uppercase tracking-wider font-semibold text-ui-fg-subtle hover:text-ui-fg-base transition-colors">
+              Handover
+            </a>
             <a href={`/admin/repairs/${id}/document?type=quote`} target="_blank" className="text-[11px] uppercase tracking-wider font-semibold text-ui-fg-subtle hover:text-ui-fg-base transition-colors">
               Quote
             </a>

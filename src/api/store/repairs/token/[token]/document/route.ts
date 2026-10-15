@@ -13,8 +13,9 @@ export async function GET(
   const query = req.scope.resolve(ContainerRegistrationKeys.QUERY);
   const type = (req.query.type as string) || "invoice";
 
-  // Fetch ticket details
-  const { data: tickets } = await query.graph({
+  // Fetch ticket details by approval_token, id, or ticket_number
+  const rawToken = req.params.token;
+  let { data: tickets } = await query.graph({
     entity: "repair_ticket",
     fields: [
       "*",
@@ -22,8 +23,22 @@ export async function GET(
       "product_variants.*",
       "product_variants.prices.*",
     ],
-    filters: { approval_token: req.params.token },
+    filters: { approval_token: rawToken },
   });
+
+  if (!tickets || tickets.length === 0) {
+    const fallbackRes = await query.graph({
+      entity: "repair_ticket",
+      fields: [
+        "*",
+        "device.*",
+        "product_variants.*",
+        "product_variants.prices.*",
+      ],
+      filters: !isNaN(Number(rawToken)) ? { ticket_number: Number(rawToken) } : { id: rawToken },
+    }).catch(() => ({ data: [] }));
+    tickets = fallbackRes.data;
+  }
 
   if (!tickets || tickets.length === 0) {
     throw new MedusaError(
