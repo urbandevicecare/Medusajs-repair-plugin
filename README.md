@@ -168,7 +168,13 @@ To verify the system's integrations (such as price formatting, Zoho Books tax ha
 ### v0.1.84
 - **SMS Payload & Duplicate Fix**: Resolved an issue where SMS notifications defaulted to sending template names instead of the actual message. Completely removed the legacy `repair-customer-reminder` subscriber, eliminating duplicate notifications.
 - **Removed TinyURL**: Replaced all `tinyurl` API calls with full tracking/PDF URLs before the native shortener was introduced.
-### v0.1.70 (Current)
+### v0.1.101 (Latest)
+- **Custom Part Addition Fix**: Fixed an undefined state reference (`setCustomPartTaxable`) in the Admin repair ticket detail view that caused a false error toast when adding custom parts, and added explicit response status validation and Tax toggle.
+- **Storefront Customer Messaging Sync**: Exposed `updates` in `/store/repairs/token/:token` and `/store/repairs/:ticket_number` payloads. Restored the Messages chat section and unified notes/messages timeline for customers accessing via tracking tokens or search, ensuring technician messages sent via "Message Customer" are immediately visible and replyable.
+- **Zoho Books Invoice Resolution**: Prevented cached PDFKit fallback records in `medusajs-documents-plugin` from short-circuiting live Zoho Books invoice generation in `generateRepairDocument`. Synchronized Zoho Books credentials between `repair_settings` and `document_settings`, with automatic self-healing fallback to ensure official Zoho invoices are streamed.
+- **Enhanced Parts Search**: Expanded parts lookup query to include `barcode`, `ean`, and `upc` fields.
+
+### v0.1.70
 - **Unified Minimalist Admin Dashboard**: Completely overhauled the Repair Ticket admin layout. Consolidated 'Issue Details', 'Update Details', 'Parts & Inventory', and 'Cost Breakdown' into a single, seamless, physical-ticket-style document. Restyled the Timeline & Communication feed into an open, borderless list for high legibility.
 - **Unified Parts Input**: Merged the "Add Custom Part" and "Add Inventory Part" components into a single, multifunctional, compact input field with a dropdown mode toggle.
 - **Paystack M-PESA Validation Fix**: Implemented an automated backend formatter in the `POST /admin/repairs/[id]/stk-push` route to strictly enforce Paystack's required `+254XXXXXXXXX` formatting, resolving `Invalid phone number format` failures during STK pushes.

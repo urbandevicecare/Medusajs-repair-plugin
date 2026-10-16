@@ -58,6 +58,7 @@ export async function GET(
     } : null,
     // Only return non-internal notes (public updates)
     notes: ticket.notes?.filter((note: any) => !note.is_internal) || [],
+    updates: ticket.updates || [],
     // Do not return custom_parts, total_estimate, internal notes, technician_id, customer_id, etc.
     created_at: ticket.created_at,
     updated_at: ticket.updated_at,

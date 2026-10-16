@@ -80,5 +80,35 @@ export async function POST(
     });
   }
 
+  // Synchronize settings with medusajs-documents-plugin if registered
+  try {
+    const docService: any = req.scope.resolve("documents", { allowUnregistered: true });
+    if (docService) {
+      const docSettings = await docService.getSettings().catch(() => null);
+      if (docSettings?.id) {
+        await docService.updateDocumentSettings({
+          id: docSettings.id,
+          zoho_books_enabled: settings.zoho_books_enabled,
+          zoho_client_id: settings.zoho_client_id,
+          zoho_client_secret: settings.zoho_client_secret,
+          zoho_refresh_token: settings.zoho_refresh_token,
+          zoho_organization_id: settings.zoho_organization_id,
+          zoho_domain: settings.zoho_domain || "com",
+          company_name: settings.company_name,
+          storefront_url: settings.storefront_url,
+          pdf_logo_url: settings.pdf_logo_url,
+          pdf_address: settings.pdf_address,
+          pdf_phone: settings.pdf_phone,
+          pdf_email: settings.pdf_email,
+          pdf_website: settings.pdf_website,
+          pdf_payment_details: settings.pdf_payment_details,
+          pdf_terms: settings.pdf_terms,
+        }).catch(() => {});
+      }
+    }
+  } catch (syncErr: any) {
+    req.scope.resolve("logger")?.warn?.(`[Repair Settings] Could not sync settings to documents plugin: ${syncErr.message}`);
+  }
+
   res.json({ settings });
 }

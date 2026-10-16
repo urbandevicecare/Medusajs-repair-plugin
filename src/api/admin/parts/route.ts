@@ -6,7 +6,7 @@ export async function GET(req: MedusaRequest, res: MedusaResponse) {
 
   const { data, metadata } = await query.graph({
     entity: "product_variant",
-    fields: ["id", "title", "sku", "product.title", "prices.*"],
+    fields: ["id", "title", "sku", "barcode", "ean", "upc", "product.title", "prices.*"],
     filters: req.filterableFields,
     pagination: req.queryConfig?.pagination,
   });
@@ -24,6 +24,9 @@ export async function GET(req: MedusaRequest, res: MedusaResponse) {
       title: variant.title,
       product_title: variant.product?.title,
       sku: variant.sku,
+      barcode: variant.barcode,
+      ean: variant.ean,
+      upc: variant.upc,
       price: price,
       is_b2b_price: true,
     };

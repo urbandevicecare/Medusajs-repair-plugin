@@ -116,6 +116,7 @@ const RepairDetailPage = () => {
   const [isAddingPart, setIsAddingPart] = useState(false);
   const [customPartName, setCustomPartName] = useState("");
   const [customPartPrice, setCustomPartPrice] = useState("");
+  const [customPartTaxable, setCustomPartTaxable] = useState(true);
   const [partInputMode, setPartInputMode] = useState<"inventory" | "custom">("inventory");
 
   const [technicianSearch, setTechnicianSearch] = useState("");
@@ -272,22 +273,27 @@ const RepairDetailPage = () => {
     if (!customPartName || customPartPrice === "") return;
     try {
       setIsAddingPart(true);
-      await fetch(`/admin/repairs/${id}/custom-parts`, {
+      const res = await fetch(`/admin/repairs/${id}/custom-parts`, {
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           name: customPartName,
           price: Number(customPartPrice),
+          is_taxable: customPartTaxable,
         }),
       });
+      if (!res.ok) {
+        const errJson = await res.json().catch(() => ({}));
+        throw new Error(errJson.message || "Failed to add custom part");
+      }
       toast.success("Custom part added");
       setCustomPartName("");
       setCustomPartPrice("");
       setCustomPartTaxable(true);
       loadTicket();
-    } catch (err) {
-      toast.error("Failed to add custom part");
+    } catch (err: any) {
+      toast.error(err.message || "Failed to add custom part");
     } finally {
       setIsAddingPart(false);
     }
@@ -883,10 +889,16 @@ const RepairDetailPage = () => {
                       {partSearch && !selectedInventoryPart && (
                         <div className="absolute left-0 z-50 w-full mt-2 bg-ui-bg-base border border-ui-border-base rounded-md shadow-md max-h-48 overflow-y-auto">
                           {inventoryParts
-                            .filter((p) =>
-                              p.title.toLowerCase().includes(partSearch.toLowerCase()) || 
-                              p.sku?.toLowerCase().includes(partSearch.toLowerCase())
-                            )
+                            .filter((p) => {
+                              const q = partSearch.toLowerCase();
+                              return (
+                                p.title?.toLowerCase().includes(q) || 
+                                p.sku?.toLowerCase().includes(q) ||
+                                p.barcode?.toLowerCase().includes(q) ||
+                                p.ean?.toLowerCase().includes(q) ||
+                                p.upc?.toLowerCase().includes(q)
+                              );
+                            })
                             .map((p) => (
                               <div
                                 key={p.id}
@@ -896,13 +908,19 @@ const RepairDetailPage = () => {
                                   setPartSearch(`${p.title} ${p.sku ? `(${p.sku})` : ""}`);
                                 }}
                               >
-                                {p.title} {p.sku ? `(${p.sku})` : ""}
+                                {p.title} {p.sku ? `(${p.sku})` : ""} {p.barcode ? `[BC: ${p.barcode}]` : ""}
                               </div>
                             ))}
-                          {inventoryParts.filter((p) =>
-                              p.title.toLowerCase().includes(partSearch.toLowerCase()) || 
-                              p.sku?.toLowerCase().includes(partSearch.toLowerCase())
-                          ).length === 0 && (
+                          {inventoryParts.filter((p) => {
+                              const q = partSearch.toLowerCase();
+                              return (
+                                p.title?.toLowerCase().includes(q) || 
+                                p.sku?.toLowerCase().includes(q) ||
+                                p.barcode?.toLowerCase().includes(q) ||
+                                p.ean?.toLowerCase().includes(q) ||
+                                p.upc?.toLowerCase().includes(q)
+                              );
+                          }).length === 0 && (
                             <div className="p-2 text-sm text-ui-fg-subtle">No parts found</div>
                           )}
                         </div>
@@ -922,6 +940,15 @@ const RepairDetailPage = () => {
                 <div className="flex items-center border-l border-ui-border-base bg-ui-bg-subtle pl-2">
                   {partInputMode === "custom" && (
                     <>
+                      <label className="flex items-center gap-1 text-[11px] text-ui-fg-muted mr-2 cursor-pointer select-none">
+                        <input
+                          type="checkbox"
+                          checked={customPartTaxable}
+                          onChange={(e) => setCustomPartTaxable(e.target.checked)}
+                          className="rounded border-ui-border-base"
+                        />
+                        Tax
+                      </label>
                       <span className="text-ui-fg-subtle text-xs mr-1">KES</span>
                       <input
                         type="number"

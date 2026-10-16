@@ -12,7 +12,7 @@ export async function GET(
 
   const { data: tickets } = await query.graph({
     entity: "repair_ticket",
-    fields: ["*", "device.*", "notes.*"],
+    fields: ["*", "device.*", "notes.*", "updates.*"],
     filters: { approval_token: req.params.token },
   });
 
@@ -27,6 +27,7 @@ export async function GET(
   const fullPayload = {
     ...ticket,
     notes: ticket.notes?.filter((note: any) => !note.is_internal) || [],
+    updates: ticket.updates || [],
   };
 
   res.json({ repair_ticket: fullPayload });
