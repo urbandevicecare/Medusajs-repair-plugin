@@ -749,12 +749,15 @@ const RepairsPage = () => {
                     <Badge color={getStatusColor(ticket.status)} size="small">
                       {ticket.status.replace("_", " ")}
                     </Badge>
-                    {(ticket.status === "completed" || ticket.status === "collected") && 
-                     ticket.payment_status !== "captured" && ticket.payment_status !== "paid" && (
+                    {(ticket.payment_status === "captured" || ticket.payment_status === "paid" || (Array.isArray(ticket.metadata?.tags) && ticket.metadata?.tags.includes("Paid"))) ? (
+                      <Badge color="green" size="small">
+                        Paid
+                      </Badge>
+                    ) : (ticket.status === "completed" || ticket.status === "collected") ? (
                       <Badge color="red" size="small">
                         Unpaid
                       </Badge>
-                    )}
+                    ) : null}
                   </div>
                 </Table.Cell>
                 <Table.Cell>

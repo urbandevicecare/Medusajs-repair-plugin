@@ -172,19 +172,61 @@ export class ZohoBooksService {
     return items;
   }
 
+  async findInvoiceByNumber(invoiceNumber: string): Promise<string | null> {
+    try {
+      const searchRes = await this.request("GET", `/invoices?invoice_number=${encodeURIComponent(invoiceNumber)}`);
+      if (searchRes.invoices && searchRes.invoices.length > 0) {
+        return searchRes.invoices[0].invoice_id;
+      }
+      const refRes = await this.request("GET", `/invoices?reference_number=RT-${encodeURIComponent(invoiceNumber)}`);
+      if (refRes.invoices && refRes.invoices.length > 0) {
+        return refRes.invoices[0].invoice_id;
+      }
+    } catch (e: any) {
+      this.logger.warn(`[Zoho Books] Error searching for invoice #${invoiceNumber}: ${e.message}`);
+    }
+    return null;
+  }
+
+  async findEstimateByNumber(estimateNumber: string): Promise<string | null> {
+    try {
+      const searchRes = await this.request("GET", `/estimates?estimate_number=${encodeURIComponent(estimateNumber)}`);
+      if (searchRes.estimates && searchRes.estimates.length > 0) {
+        return searchRes.estimates[0].estimate_id;
+      }
+      const refRes = await this.request("GET", `/estimates?reference_number=RT-${encodeURIComponent(estimateNumber)}`);
+      if (refRes.estimates && refRes.estimates.length > 0) {
+        return refRes.estimates[0].estimate_id;
+      }
+    } catch (e: any) {
+      this.logger.warn(`[Zoho Books] Error searching for estimate #${estimateNumber}: ${e.message}`);
+    }
+    return null;
+  }
+
   async createEstimate(contactId: string, ticket: any): Promise<string> {
+    // Check if estimate already exists in Zoho for this ticket number to prevent duplicates
+    if (ticket.ticket_number) {
+      const existingId = await this.findEstimateByNumber(ticket.ticket_number);
+      if (existingId) {
+        this.logger.info(`[Zoho Books] Reusing existing estimate ${existingId} for ticket #${ticket.ticket_number}`);
+        return existingId;
+      }
+    }
+
     let notes = "Generated from Medusa Repair Module";
     if (ticket._paymentLinkText) notes += `\n\n${ticket._paymentLinkText}`;
     
     const payload = {
       customer_id: contactId,
+      estimate_number: ticket.ticket_number,
       reference_number: `RT-${ticket.ticket_number}`,
       line_items: this.formatLineItems(ticket),
       notes,
       is_inclusive_tax: false
     };
 
-    const res = await this.request("POST", "/estimates", payload);
+    const res = await this.request("POST", "/estimates?ignore_auto_number_generation=true", payload);
     return res.estimate.estimate_id;
   }
 
@@ -193,23 +235,37 @@ export class ZohoBooksService {
   }
 
   async createInvoice(contactId: string, ticket: any): Promise<string> {
+    // Check if invoice already exists in Zoho for this ticket number to prevent duplicates
+    if (ticket.ticket_number) {
+      const existingId = await this.findInvoiceByNumber(ticket.ticket_number);
+      if (existingId) {
+        this.logger.info(`[Zoho Books] Reusing existing invoice ${existingId} for ticket #${ticket.ticket_number}`);
+        return existingId;
+      }
+    }
+
     let notes = "Generated from Medusa Repair Module";
     if (ticket._paymentLinkText) notes += `\n\n${ticket._paymentLinkText}`;
 
     const payload = {
       customer_id: contactId,
+      invoice_number: ticket.ticket_number,
       reference_number: `RT-${ticket.ticket_number}`,
       line_items: this.formatLineItems(ticket),
       notes,
       is_inclusive_tax: false
     };
 
-    const res = await this.request("POST", "/invoices", payload);
+    const res = await this.request("POST", "/invoices?ignore_auto_number_generation=true", payload);
     return res.invoice.invoice_id;
   }
 
   async deleteInvoice(invoiceId: string): Promise<void> {
     await this.request("DELETE", `/invoices/${invoiceId}`);
+  }
+
+  async deletePayment(paymentId: string): Promise<void> {
+    await this.request("DELETE", `/customerpayments/${paymentId}`);
   }
 
   async getDocumentPdf(documentId: string, type: "estimate" | "invoice"): Promise<ArrayBuffer> {

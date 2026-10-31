@@ -36,24 +36,53 @@ export const updateTicketPaymentStep = createStep(
     const amountPaidSoFar = parseNum(ticket.amount_paid);
     const newAmountPaid = amountPaidSoFar + input.actualPaidAmount;
     
-    const isFullyPaid = newAmountPaid >= totalEstimate;
+    const targetTotal = parseNum(ticket.total_actual) > 0 ? parseNum(ticket.total_actual) : totalEstimate;
+    const isFullyPaid = newAmountPaid >= targetTotal;
 
     const previousData = {
       id: ticket.id,
       amount_paid: ticket.amount_paid,
       payment_status: ticket.payment_status,
-      status: ticket.status
+      status: ticket.status,
+      metadata: ticket.metadata,
+      collected_at: ticket.collected_at,
     };
 
-    const newStatus = (ticket.status === "awaiting_approval" && isFullyPaid) ? "ready" : ticket.status;
-
-    const updatedTicket = await repairService.updateRepairTickets({
+    let newStatus = ticket.status;
+    const updatePayload: any = {
       id: ticket.id,
       amount_paid: newAmountPaid,
       payment_status: isFullyPaid ? "captured" : "pending",
-      status: newStatus,
       payment_collection_id: input.reference
-    });
+    };
+
+    const existingMetadata = (ticket.metadata as Record<string, any>) || {};
+    const rawTags = existingMetadata.tags;
+    const existingTags: string[] = Array.isArray(rawTags)
+      ? [...rawTags]
+      : typeof rawTags === "string"
+      ? rawTags.split(",").map((t: string) => t.trim()).filter(Boolean)
+      : [];
+
+    if (isFullyPaid) {
+      if (!existingTags.includes("Paid")) {
+        existingTags.push("Paid");
+      }
+      if (ticket.status === "ready") {
+        newStatus = "collected";
+        updatePayload.collected_at = new Date();
+      } else if (ticket.status === "awaiting_approval") {
+        newStatus = "repairing";
+      }
+    }
+
+    updatePayload.status = newStatus;
+    updatePayload.metadata = {
+      ...existingMetadata,
+      tags: existingTags,
+    };
+
+    const updatedTicket = await repairService.updateRepairTickets(updatePayload);
 
     return new StepResponse(updatedTicket, previousData);
   },

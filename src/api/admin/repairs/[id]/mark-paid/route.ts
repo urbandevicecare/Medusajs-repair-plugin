@@ -30,15 +30,41 @@ export async function POST(req: MedusaRequest, res: MedusaResponse) {
   const newAmountPaid = parseNum(ticket.amount_paid) + amountToPay;
   const isFullyPaid = newAmountPaid >= targetTotal;
 
-  const newStatus = (ticket.status === "awaiting_approval" && isFullyPaid) ? "ready" : ticket.status;
-
-  const updatedTicket = await repairService.updateRepairTickets({
+  let newStatus = ticket.status;
+  const updates: any = {
     id,
     amount_paid: newAmountPaid,
     payment_status: isFullyPaid ? "captured" : "pending",
-    status: newStatus,
     payment_collection_id: reference || ticket.payment_collection_id
-  });
+  };
+
+  const existingMetadata = (ticket.metadata as Record<string, any>) || {};
+  const rawTags = existingMetadata.tags;
+  const existingTags: string[] = Array.isArray(rawTags)
+    ? [...rawTags]
+    : typeof rawTags === "string"
+    ? rawTags.split(",").map((t: string) => t.trim()).filter(Boolean)
+    : [];
+
+  if (isFullyPaid) {
+    if (!existingTags.includes("Paid")) {
+      existingTags.push("Paid");
+    }
+    if (ticket.status === "ready") {
+      newStatus = "collected";
+      updates.collected_at = new Date();
+    } else if (ticket.status === "awaiting_approval") {
+      newStatus = "repairing";
+    }
+  }
+
+  updates.status = newStatus;
+  updates.metadata = {
+    ...existingMetadata,
+    tags: existingTags,
+  };
+
+  const updatedTicket = await repairService.updateRepairTickets(updates);
   
   try {
      // Trigger Zoho sync as a cash/manual payment

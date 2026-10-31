@@ -1131,6 +1131,11 @@ export async function generateRepairDocument(
           }
         }
         if (!invId || !pdfBuffer) {
+          const allowedInvoiceStatuses = ["repairing", "ready", "completed", "collected"];
+          if (!allowedInvoiceStatuses.includes(ticket.status)) {
+            logger?.info?.(`[generateRepairDocument] Ticket ${ticket.ticket_number} is in '${ticket.status}' status. Deferring Zoho Books invoice creation until repair phase (repairing/ready/completed/collected).`);
+            throw new Error(`Zoho invoice creation deferred: ticket status is '${ticket.status}'`);
+          }
           invId = await zoho.createInvoice(contactId, ticket);
           await repairService.updateRepairTickets({ id: ticket.id, metadata: { ...metadata, zoho_invoice_id: invId } });
           pdfBuffer = await zoho.getDocumentPdf(invId, "invoice");
@@ -1155,7 +1160,42 @@ export async function generateRepairDocument(
     }
   }
 
-  // 2. High-Fidelity Local PDFKit Generation
+  // 2. Always delegate PDFKit rendering to medusajs-documents-plugin if available
+  try {
+    const docService: any = req.scope.resolve("documents", { allowUnregistered: true });
+    if (docService && ["job_card", "invoice", "quote", "receipt"].includes(cleanType)) {
+      const typeFilter = cleanType === "quote" ? "estimate" : cleanType;
+      const cleanTicketNumber = String(ticket.ticket_number || "").replace(/^(JOB-|RT-)+/i, "");
+      const displayId =
+        cleanType === "job_card"
+          ? `JOB-${cleanTicketNumber}`
+          : cleanType === "receipt"
+          ? `RCPT-${cleanTicketNumber}`
+          : cleanType === "quote"
+          ? `EST-${cleanTicketNumber}`
+          : `RT-${cleanTicketNumber}`;
+
+      const genRes = await docService.generateDocument({
+        display_id: displayId,
+        title: cleanType === "job_card" ? "Repair Job Card" : cleanType === "receipt" ? "Repair Payment Receipt" : cleanType === "quote" ? "Repair Estimate / Quote" : "Repair Invoice",
+        type: typeFilter,
+        repair_ticket_id: ticket.id,
+        force_source: "pdfkit",
+        auto_send: false,
+      }, req.scope);
+
+      if (genRes?.pdfBuffer) {
+        res.setHeader("Content-Type", "application/pdf");
+        res.setHeader("Content-Disposition", `inline; filename="${cleanType}-${ticket.ticket_number}.pdf"`);
+        res.setHeader("Content-Length", String(genRes.pdfBuffer.length));
+        return res.send(genRes.pdfBuffer);
+      }
+    }
+  } catch (delegateErr: any) {
+    logger?.warn?.(`[generateRepairDocument] Failed delegating PDFKit generation to documents module: ${delegateErr.message}`);
+  }
+
+  // 3. Fallback Local PDFKit Generation if documents module is unregistered or failed
   try {
     const pdfBuffer = await generateRepairPdfBuffer(cleanType, ticket, customerName, settings, storeUrl);
     res.setHeader("Content-Type", "application/pdf");

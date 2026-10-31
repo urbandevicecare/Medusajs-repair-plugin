@@ -123,6 +123,7 @@ const RepairDetailPage = () => {
   const [technicianOptions, setTechnicianOptions] = useState<any[]>([]);
   const [showTechnicianDropdown, setShowTechnicianDropdown] = useState(false);
   const [isSendingReminder, setIsSendingReminder] = useState(false);
+  const [isResettingDocs, setIsResettingDocs] = useState(false);
   const [isPushingStk, setIsPushingStk] = useState(false);
 
   useEffect(() => {
@@ -389,6 +390,29 @@ const RepairDetailPage = () => {
     }
   };
 
+  const handleResetDocuments = async () => {
+    if (!window.confirm("Are you sure you want to delete and reset all generated documents for this ticket? Existing documents in Zoho Books and local storage will be removed so they can be regenerated afresh.")) {
+      return;
+    }
+    try {
+      setIsResettingDocs(true);
+      const res = await fetch(`/admin/repairs/${id}/document`, {
+        method: "DELETE",
+        credentials: "include",
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.message || "Failed to reset documents");
+      }
+      toast.success(data.message || "Documents reset successfully");
+      await loadTicket();
+    } catch (err: any) {
+      toast.error(err.message || "Failed to reset documents");
+    } finally {
+      setIsResettingDocs(false);
+    }
+  };
+
   const handleUpdateCosts = async (overrides?: { newStatus?: string; technicianName?: string; technicianId?: string; laborCost?: string; etc?: string }) => {
     try {
       const promises = [];
@@ -546,6 +570,9 @@ const RepairDetailPage = () => {
               {ticket.technician_name && (
                 <Badge color="purple">{ticket.technician_name}</Badge>
               )}
+              {(ticket.payment_status === "captured" || ticket.payment_status === "paid" || (Array.isArray(ticket.metadata?.tags) && ticket.metadata?.tags.includes("Paid"))) && (
+                <Badge color="green">Paid</Badge>
+              )}
             </div>
             {ticket.device && (
               <Text className="text-ui-fg-subtle mt-2">
@@ -579,6 +606,14 @@ const RepairDetailPage = () => {
                 Receipt
               </span>
             )}
+            <button
+              onClick={handleResetDocuments}
+              disabled={isResettingDocs}
+              className="text-[11px] uppercase tracking-wider font-semibold text-red-600 hover:text-red-700 transition-colors disabled:opacity-50"
+              title="Delete generated Zoho invoices/estimates & local records to regenerate afresh"
+            >
+              {isResettingDocs ? "Resetting..." : "Reset Docs"}
+            </button>
             <button 
               onClick={handleSendReminder}
               disabled={isSendingReminder}
@@ -725,29 +760,7 @@ const RepairDetailPage = () => {
                 </div>
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                {/* Labor Cost */}
-                <div className="relative">
-                  <span className="text-[10px] uppercase font-semibold text-ui-fg-muted tracking-wider mb-1 block">Labor Cost (KES)</span>
-                  <div className="flex items-center border border-ui-border-base rounded-md overflow-hidden bg-ui-bg-base focus-within:ring-2 focus-within:ring-ui-fg-interactive transition-all">
-                    <span className="text-ui-fg-muted pl-3 text-sm">KES</span>
-                    <input 
-                      type="number" 
-                      step="0.01"
-                      placeholder="0.00" 
-                      className="w-full bg-transparent text-sm px-2 py-[9px] outline-none text-ui-fg-base placeholder-ui-fg-muted"
-                      value={laborCost}
-                      onChange={(e) => setLaborCost(e.target.value)}
-                      onBlur={(e) => handleUpdateCosts({ laborCost: e.target.value })}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter") {
-                          e.currentTarget.blur();
-                        }
-                      }}
-                    />
-                  </div>
-                </div>
-
+              <div className="grid grid-cols-1 gap-3">
                 {/* Estimated Completion */}
                 <div className="relative">
                   <span className="text-[10px] uppercase font-semibold text-ui-fg-muted tracking-wider mb-1 block">Est. Completion</span>
@@ -940,15 +953,6 @@ const RepairDetailPage = () => {
                 <div className="flex items-center border-l border-ui-border-base bg-ui-bg-subtle pl-2">
                   {partInputMode === "custom" && (
                     <>
-                      <label className="flex items-center gap-1 text-[11px] text-ui-fg-muted mr-2 cursor-pointer select-none">
-                        <input
-                          type="checkbox"
-                          checked={customPartTaxable}
-                          onChange={(e) => setCustomPartTaxable(e.target.checked)}
-                          className="rounded border-ui-border-base"
-                        />
-                        Tax
-                      </label>
                       <span className="text-ui-fg-subtle text-xs mr-1">KES</span>
                       <input
                         type="number"
