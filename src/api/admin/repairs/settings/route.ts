@@ -13,12 +13,6 @@ export async function GET(req: MedusaRequest, res: MedusaResponse) {
       sms_notifications_enabled: true,
       whatsapp_notifications_enabled: false,
       company_name: "Urban Device Care Ltd",
-      invoice_template: "zoho_exact",
-      estimate_template: "zoho_exact",
-      receipt_template: "zoho_exact",
-      job_card_template: "standard",
-      service_report_template: "standard",
-      handover_template: "standard",
     });
   }
 
@@ -42,20 +36,6 @@ export async function POST(
     paystack_secret_key?: string;
     company_name?: string;
     storefront_url?: string;
-    pdf_logo_url?: string;
-    pdf_address?: string;
-    pdf_phone?: string;
-    pdf_email?: string;
-    pdf_website?: string;
-    pdf_payment_details?: string;
-    pdf_terms?: string;
-    kra_pin?: string;
-    invoice_template?: string;
-    estimate_template?: string;
-    receipt_template?: string;
-    job_card_template?: string;
-    service_report_template?: string;
-    handover_template?: string;
     email_subject_template?: string;
     email_body_template?: string;
     sms_body_template?: string;
@@ -80,7 +60,7 @@ export async function POST(
     });
   }
 
-  // Synchronize settings with medusajs-documents-plugin if registered
+  // Synchronize common credentials with medusajs-documents-plugin if registered
   try {
     const docService: any = req.scope.resolve("documents", { allowUnregistered: true });
     if (docService) {
@@ -96,13 +76,6 @@ export async function POST(
           zoho_domain: settings.zoho_domain || "com",
           company_name: settings.company_name,
           storefront_url: settings.storefront_url,
-          pdf_logo_url: settings.pdf_logo_url,
-          pdf_address: settings.pdf_address,
-          pdf_phone: settings.pdf_phone,
-          pdf_email: settings.pdf_email,
-          pdf_website: settings.pdf_website,
-          pdf_payment_details: settings.pdf_payment_details,
-          pdf_terms: settings.pdf_terms,
         }).catch(() => {});
       }
     }

@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert";
 import globalNotificationHandler from "../src/subscribers/notifications";
-import { generateRepairPdfBuffer } from "../src/utils/generate-repair-document";
+import { generateRepairDocument } from "../src/utils/generate-repair-document";
 import { getRepairTemplate } from "../src/utils/templates/repair";
 
 // Mock helper to create container
@@ -310,7 +310,7 @@ test("Requirement 1: repair.payment_received creates payment receipt notificatio
   assert.strictEqual(emailNotif.data.pdf_url, "http://localhost:3000/api/admin/documents/rec_999/document");
 });
 
-test("Requirement 2: generateRepairPdfBuffer generates valid PDFs for all official document layouts", async () => {
+test("Requirement 2: generateRepairDocument delegates to documents module and removes any local PDFKit fallback", async () => {
   const sampleTicket = {
     id: "rep_pdf_test_01",
     ticket_number: "2026101501",
@@ -325,48 +325,75 @@ test("Requirement 2: generateRepairPdfBuffer generates valid PDFs for all offici
     issue_description: "Cracked display glass and dead pixels on LCD panel.",
     technician_name: "Bonifencia A.",
     created_at: new Date().toISOString(),
-    customer: {
-      first_name: "Nelson",
-      email: "nelson@example.com",
-      phone: "+254700000000",
-    },
-    device: {
-      brand: "Apple",
-      model_name: "MacBook Air 13-inch (M2)",
-      serial_number: "C02XYZ12345",
-      imei: "N/A",
-      condition: "Clean chassis with minor scratches on bottom plate",
-      parts_used: [
-        { name: "OEM Retina Display", sku: "APL-DISP-M2", price: 11500 },
-      ],
-    },
-  };
-
-  const settings = {
-    company_name: "Urban Device Care Ltd",
-    pdf_address: "Bekim House, Westlands, Nairobi",
-    pdf_phone: "0729436660",
-    pdf_email: "info@urbandevicecare.co.uk",
-    kra_pin: "P052534849N",
+    customer_email: "nelson@example.com",
+    customer_phone: "+254700000000",
   };
 
   const docTypes = ["invoice", "quote", "receipt", "job_card", "service_report", "handover"];
 
+  // 1. When documents module is available: generates document via documents module
   for (const docType of docTypes) {
-    const buffer = await generateRepairPdfBuffer(
-      docType,
-      sampleTicket,
-      "Nelson Owalo",
-      settings,
-      "http://localhost:3000"
-    );
+    let sentBuffer: any = null;
+    const mockRes: any = {
+      setHeader: () => {},
+      send: (b: any) => { sentBuffer = b; },
+      status: () => mockRes,
+      json: () => {},
+    };
 
-    assert.ok(buffer instanceof Buffer, `Output for ${docType} must be a Buffer`);
-    assert.ok(buffer.length > 500, `Buffer for ${docType} should be substantially sized (got ${buffer.length} bytes)`);
-    // Verify standard PDF header magic bytes "%PDF-"
-    const magicHeader = buffer.slice(0, 5).toString("ascii");
-    assert.strictEqual(magicHeader, "%PDF-", `${docType} must start with standard PDF magic number %PDF-`);
+    let calledInput: any = null;
+    const mockReq: any = {
+      scope: {
+        resolve: (key: string) => {
+          if (key === "repair") return { listRepairSettings: async () => [{}] };
+          if (key === "logger") return { info: () => {}, warn: () => {}, error: () => {} };
+          if (key === "documents") {
+            return {
+              listDocumentRecords: async () => [],
+              generateDocument: async (input: any) => {
+                calledInput = input;
+                return { pdfBuffer: Buffer.from(`%PDF-1.4 mock ${docType}`) };
+              },
+            };
+          }
+          return null;
+        },
+      },
+    };
+
+    await generateRepairDocument(docType, sampleTicket, "Nelson Owalo", mockRes, mockReq);
+
+    assert.ok(sentBuffer instanceof Buffer, `Output for ${docType} must be a Buffer`);
+    assert.ok(calledInput, `documents.generateDocument must be called for ${docType}`);
+    assert.strictEqual(calledInput.force_source, "zoho");
+    assert.strictEqual(sentBuffer.slice(0, 5).toString("ascii"), "%PDF-");
   }
+
+  // 2. When documents module is missing: must error cleanly with 500 without local PDFKit fallback
+  let errorStatus = 0;
+  let errorJson: any = null;
+  const errorRes: any = {
+    setHeader: () => {},
+    send: () => {},
+    status: (code: number) => {
+      errorStatus = code;
+      return errorRes;
+    },
+    json: (j: any) => { errorJson = j; },
+  };
+
+  const noDocReq: any = {
+    scope: {
+      resolve: (key: string) => {
+        if (key === "logger") return { info: () => {}, warn: () => {}, error: () => {} };
+        return null; // documents module unregistered
+      },
+    },
+  };
+
+  await generateRepairDocument("invoice", sampleTicket, "Nelson Owalo", errorRes, noDocReq);
+  assert.strictEqual(errorStatus, 500, "Must return 500 when documents module is missing");
+  assert.strictEqual(errorJson?.error, "documents_module_not_found", "Must declare documents_module_not_found and reject fallback");
 });
 
 test("Requirement 1 & Handover: repair.created notification seamlessly embeds handed-over job_card link", async () => {
@@ -529,6 +556,14 @@ test("Token Document Route: supports ticket lookup by ID and ticket number when 
         }
         if (key === "logger") {
           return { info: () => {}, warn: () => {}, error: () => {}, debug: () => {} };
+        }
+        if (key === "documents") {
+          return {
+            listDocumentRecords: async () => [],
+            generateDocument: async () => ({
+              pdfBuffer: Buffer.from("%PDF-1.4 mock token job card"),
+            }),
+          };
         }
         return null;
       },
