@@ -963,224 +963,60 @@ export async function generateRepairDocument(
   }
 
   const cleanType = (docType || "job_card").toLowerCase().trim();
+  const typeFilter = cleanType === "quote" ? "estimate" : cleanType;
 
-  // 0. If medusajs-documents-plugin is registered, check if document already exists or stream it directly
-  const isZohoEnabled = Boolean(
-    settings?.zoho_books_enabled &&
-    settings.zoho_client_id &&
-    settings.zoho_client_secret &&
-    settings.zoho_refresh_token &&
-    settings.zoho_organization_id &&
-    ["invoice", "quote", "receipt"].includes(cleanType)
-  );
-
+  // 1. Delegate entirely to medusajs-documents-plugin as the single source of truth
   try {
     const docService: any = req.scope.resolve("documents", { allowUnregistered: true });
     if (docService) {
-      const typeFilter = cleanType === "quote" ? "estimate" : cleanType;
+      // Check for existing document record first
       const docs = await docService.listDocumentRecords({
         repair_ticket_id: ticket.id,
         type: typeFilter,
       }).catch(() => []);
+
       if (docs && docs.length > 0) {
         docs.sort((a: any, b: any) => new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime());
         const primaryDoc = docs[0];
-
-        // Only serve cached record if Zoho is not enabled, or if the cached record is already an authentic Zoho record
-        if (!isZohoEnabled || primaryDoc.source === "zoho" || primaryDoc.zoho_document_id) {
-          const pdfBuf = await docService.getPdfForRecord(primaryDoc.id, req.scope).catch(() => null);
-          if (pdfBuf) {
-            res.setHeader("Content-Type", "application/pdf");
-            res.setHeader("Content-Disposition", `inline; filename="${cleanType}-${ticket.ticket_number}.pdf"`);
-            res.setHeader("Content-Length", String(pdfBuf.length));
-            res.setHeader("Cache-Control", "public, max-age=3600");
-            return res.send(pdfBuf);
-          }
+        const pdfBuf = await docService.getPdfForRecord(primaryDoc.id, req.scope).catch(() => null);
+        if (pdfBuf) {
+          res.setHeader("Content-Type", "application/pdf");
+          res.setHeader("Content-Disposition", `inline; filename="${cleanType}-${ticket.ticket_number}.pdf"`);
+          res.setHeader("Content-Length", String(pdfBuf.length));
+          res.setHeader("Cache-Control", "public, max-age=3600");
+          return res.send(pdfBuf);
         }
       }
-    }
-  } catch (docErr: any) {
-    logger?.warn?.(`[generateRepairDocument] Documents module check skipped: ${docErr.message}`);
-  }
 
-  // 1. If Zoho Books is enabled AND document is invoice, quote, or receipt, try Zoho integration
-  if (
-    settings?.zoho_books_enabled &&
-    settings.zoho_client_id &&
-    settings.zoho_client_secret &&
-    settings.zoho_refresh_token &&
-    settings.zoho_organization_id &&
-    ["invoice", "quote", "receipt"].includes(cleanType)
-  ) {
-    const zoho = new ZohoBooksService(
-      {
-        client_id: settings.zoho_client_id,
-        client_secret: settings.zoho_client_secret,
-        refresh_token: settings.zoho_refresh_token,
-        organization_id: settings.zoho_organization_id,
-        domain: settings.zoho_domain || "com",
-      },
-      logger
-    );
-
-    try {
-      let customerObj: any = { email: `guest-${ticket.id}@example.com`, first_name: customerName };
-      if (ticket.customer_id) {
-        const customerModule = req.scope.resolve("customer", { allowUnregistered: true });
-        if (customerModule) {
-          const c = await customerModule.retrieveCustomer(ticket.customer_id);
-          if (c) customerObj = c;
-        }
-      }
-      if (!customerObj.email && ticket.customer_email) customerObj.email = ticket.customer_email;
-      if (!customerObj.phone && ticket.customer_phone) customerObj.phone = ticket.customer_phone;
-      if (!customerObj.first_name && ticket.customer_name) customerObj.first_name = ticket.customer_name;
-
-      const contactId = await zoho.syncContact(customerObj);
-      const metadata = ticket.metadata || {};
-
-      const targetTotal = (ticket.total_actual && ticket.total_actual > 0) ? ticket.total_actual : ticket.total_estimate;
-      const balanceDue = Math.max(0, targetTotal - (ticket.amount_paid || 0));
-      if (balanceDue > 0 && ticket.approval_token && (cleanType === "invoice" || cleanType === "quote")) {
-        const sUrl = storeUrl.replace(/\/$/, "");
-        const lUrl = `${sUrl}/repairs/track?token=${ticket.approval_token}`;
-        const shortL = await getOrGenerateShortUrl(lUrl, repairService, sUrl);
-        ticket._paymentLinkText = `Pay Online: ${shortL}`;
-      }
-
-      let docService: any = null;
-      try {
-        docService = req.scope.resolve("documents", { allowUnregistered: true });
-      } catch (_) {}
-
-      if (cleanType === "quote") {
-        let estId = metadata.zoho_estimate_id as string;
-        let pdfBuffer: ArrayBuffer | null = null;
-        if (estId) {
-          try {
-            pdfBuffer = await zoho.getDocumentPdf(estId, "estimate");
-          } catch (fetchErr: any) {
-            logger?.warn?.(`[generateRepairDocument] Failed to fetch existing Zoho estimate ${estId}: ${fetchErr.message}. Creating fresh estimate.`);
-            estId = "";
-          }
-        }
-        if (!estId || !pdfBuffer) {
-          estId = await zoho.createEstimate(contactId, ticket);
-          await repairService.updateRepairTickets({ id: ticket.id, metadata: { ...metadata, zoho_estimate_id: estId } });
-          pdfBuffer = await zoho.getDocumentPdf(estId, "estimate");
-        }
-        const modifiedBuffer = await postProcessZohoPdf(Buffer.from(pdfBuffer), ticket, cleanType);
-
-        if (docService) {
-          try {
-            const docs = await docService.listDocumentRecords({ repair_ticket_id: ticket.id, type: "estimate" }).catch(() => []);
-            if (docs && docs.length > 0) {
-              await docService.updateDocumentRecords({ id: docs[0].id, source: "zoho", zoho_document_id: estId }).catch(() => {});
-            }
-          } catch (_) {}
-        }
-
-        res.setHeader("Content-Type", "application/pdf");
-        res.setHeader("Content-Disposition", `inline; filename="Repair-Quote-${ticket.ticket_number}.pdf"`);
-        return res.send(modifiedBuffer);
-      } else if (cleanType === "receipt") {
-        let paymentId = metadata.zoho_payment_id as string;
-        let pdfBuffer: ArrayBuffer | null = null;
-        if (paymentId) {
-          try {
-            pdfBuffer = await zoho.getPaymentReceiptPdf(paymentId);
-          } catch (fetchErr: any) {
-            logger?.warn?.(`[generateRepairDocument] Failed to fetch existing Zoho payment receipt ${paymentId}: ${fetchErr.message}.`);
-            paymentId = "";
-          }
-        }
-        if (!paymentId || !pdfBuffer) {
-          let invId = metadata.zoho_invoice_id as string;
-          if (!invId) {
-            invId = await zoho.createInvoice(contactId, ticket);
-            await repairService.updateRepairTickets({ id: ticket.id, metadata: { ...metadata, zoho_invoice_id: invId } });
-          }
-          const amt = Number(ticket.amount_paid || targetTotal || 0);
-          paymentId = await zoho.registerPayment(invId, amt, contactId, "Online", `RCPT-${ticket.ticket_number}`);
-          await repairService.updateRepairTickets({ id: ticket.id, metadata: { ...metadata, zoho_payment_id: paymentId, zoho_invoice_id: invId } });
-          pdfBuffer = await zoho.getPaymentReceiptPdf(paymentId);
-        }
-        const modifiedBuffer = await postProcessZohoPdf(Buffer.from(pdfBuffer), ticket, cleanType);
-
-        if (docService) {
-          try {
-            const docs = await docService.listDocumentRecords({ repair_ticket_id: ticket.id, type: "receipt" }).catch(() => []);
-            if (docs && docs.length > 0) {
-              await docService.updateDocumentRecords({ id: docs[0].id, source: "zoho", zoho_document_id: paymentId }).catch(() => {});
-            }
-          } catch (_) {}
-        }
-
-        res.setHeader("Content-Type", "application/pdf");
-        res.setHeader("Content-Disposition", `inline; filename="Repair-Receipt-${ticket.ticket_number}.pdf"`);
-        return res.send(modifiedBuffer);
-      } else if (cleanType === "invoice") {
-        let invId = metadata.zoho_invoice_id as string;
-        let pdfBuffer: ArrayBuffer | null = null;
-        if (invId) {
-          try {
-            pdfBuffer = await zoho.getDocumentPdf(invId, "invoice");
-          } catch (fetchErr: any) {
-            logger?.warn?.(`[generateRepairDocument] Failed to fetch existing Zoho invoice ${invId}: ${fetchErr.message}. Creating fresh invoice.`);
-            invId = "";
-          }
-        }
-        if (!invId || !pdfBuffer) {
-          const allowedInvoiceStatuses = ["repairing", "ready", "completed", "collected"];
-          if (!allowedInvoiceStatuses.includes(ticket.status)) {
-            logger?.info?.(`[generateRepairDocument] Ticket ${ticket.ticket_number} is in '${ticket.status}' status. Deferring Zoho Books invoice creation until repair phase (repairing/ready/completed/collected).`);
-            throw new Error(`Zoho invoice creation deferred: ticket status is '${ticket.status}'`);
-          }
-          invId = await zoho.createInvoice(contactId, ticket);
-          await repairService.updateRepairTickets({ id: ticket.id, metadata: { ...metadata, zoho_invoice_id: invId } });
-          pdfBuffer = await zoho.getDocumentPdf(invId, "invoice");
-        }
-        const modifiedBuffer = await postProcessZohoPdf(Buffer.from(pdfBuffer), ticket, cleanType);
-
-        if (docService) {
-          try {
-            const docs = await docService.listDocumentRecords({ repair_ticket_id: ticket.id, type: "invoice" }).catch(() => []);
-            if (docs && docs.length > 0) {
-              await docService.updateDocumentRecords({ id: docs[0].id, source: "zoho", zoho_document_id: invId }).catch(() => {});
-            }
-          } catch (_) {}
-        }
-
-        res.setHeader("Content-Type", "application/pdf");
-        res.setHeader("Content-Disposition", `inline; filename="Repair-Invoice-${ticket.ticket_number}.pdf"`);
-        return res.send(modifiedBuffer);
-      }
-    } catch (e: any) {
-      logger?.warn?.(`[generateRepairDocument] Zoho Books sync failed, falling back to local PDFKit: ${e.message}`);
-    }
-  }
-
-  // 2. Always delegate PDFKit rendering to medusajs-documents-plugin if available
-  try {
-    const docService: any = req.scope.resolve("documents", { allowUnregistered: true });
-    if (docService && ["job_card", "invoice", "quote", "receipt"].includes(cleanType)) {
-      const typeFilter = cleanType === "quote" ? "estimate" : cleanType;
+      // If document record does not exist yet, generate it via documents module (central single source of truth)
       const cleanTicketNumber = String(ticket.ticket_number || "").replace(/^(JOB-|RT-)+/i, "");
       const displayId =
         cleanType === "job_card"
           ? `JOB-${cleanTicketNumber}`
           : cleanType === "receipt"
           ? `RCPT-${cleanTicketNumber}`
-          : cleanType === "quote"
+          : cleanType === "quote" || cleanType === "estimate"
           ? `EST-${cleanTicketNumber}`
           : `RT-${cleanTicketNumber}`;
 
       const genRes = await docService.generateDocument({
         display_id: displayId,
-        title: cleanType === "job_card" ? "Repair Job Card" : cleanType === "receipt" ? "Repair Payment Receipt" : cleanType === "quote" ? "Repair Estimate / Quote" : "Repair Invoice",
+        title:
+          cleanType === "job_card"
+            ? "Repair Job Card"
+            : cleanType === "receipt"
+            ? "Repair Payment Receipt"
+            : cleanType === "quote" || cleanType === "estimate"
+            ? "Repair Estimate / Quote"
+            : "Repair Invoice",
         type: typeFilter,
         repair_ticket_id: ticket.id,
-        force_source: "pdfkit",
+        currency_code: ticket.currency_code || "KES",
+        customer_id: ticket.customer_id,
+        customer_name: customerName,
+        customer_email: ticket.customer_email,
+        customer_phone: ticket.customer_phone,
+        total: Number(ticket.total_actual || ticket.total_estimate || 0),
         auto_send: false,
       }, req.scope);
 
@@ -1191,8 +1027,8 @@ export async function generateRepairDocument(
         return res.send(genRes.pdfBuffer);
       }
     }
-  } catch (delegateErr: any) {
-    logger?.warn?.(`[generateRepairDocument] Failed delegating PDFKit generation to documents module: ${delegateErr.message}`);
+  } catch (docErr: any) {
+    logger?.warn?.(`[generateRepairDocument] Error delegating to documents module: ${docErr.message}`);
   }
 
   // 3. Fallback Local PDFKit Generation if documents module is unregistered or failed

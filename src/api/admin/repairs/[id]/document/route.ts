@@ -91,69 +91,77 @@ export async function DELETE(
   const ticket = tickets[0];
   const metadata = (ticket.metadata as Record<string, any>) || {};
 
-  // 1. Delete from Zoho Books if configured
-  try {
-    const settingsList = await repairService.listRepairSettings({});
-    const settings = settingsList?.[0];
-    if (
-      settings?.zoho_books_enabled &&
-      settings.zoho_client_id &&
-      settings.zoho_client_secret &&
-      settings.zoho_refresh_token &&
-      settings.zoho_organization_id
-    ) {
-      const zoho = new ZohoBooksService(
-        {
-          client_id: settings.zoho_client_id,
-          client_secret: settings.zoho_client_secret,
-          refresh_token: settings.zoho_refresh_token,
-          organization_id: settings.zoho_organization_id,
-          domain: settings.zoho_domain || "com",
-        },
-        logger as any
-      );
-
-      if (metadata.zoho_payment_id) {
-        try {
-          await zoho.deletePayment(metadata.zoho_payment_id);
-          logger.info(`[Delete Documents] Deleted Zoho payment: ${metadata.zoho_payment_id}`);
-        } catch (e: any) {
-          logger.warn(`[Delete Documents] Failed to delete Zoho payment: ${e.message}`);
-        }
-      }
-
-      if (metadata.zoho_invoice_id) {
-        try {
-          await zoho.deleteInvoice(metadata.zoho_invoice_id);
-          logger.info(`[Delete Documents] Deleted Zoho invoice: ${metadata.zoho_invoice_id}`);
-        } catch (e: any) {
-          logger.warn(`[Delete Documents] Failed to delete Zoho invoice: ${e.message}`);
-        }
-      }
-
-      if (metadata.zoho_estimate_id) {
-        try {
-          await zoho.deleteEstimate(metadata.zoho_estimate_id);
-          logger.info(`[Delete Documents] Deleted Zoho estimate: ${metadata.zoho_estimate_id}`);
-        } catch (e: any) {
-          logger.warn(`[Delete Documents] Failed to delete Zoho estimate: ${e.message}`);
-        }
-      }
-    }
-  } catch (err: any) {
-    logger.warn(`[Delete Documents] Zoho cleanup error: ${err.message}`);
-  }
-
-  // 2. Delete document records in medusajs-documents-plugin if present
+  // 1. Delegate document and Zoho cleanup to medusajs-documents-plugin if present
+  let handledByDocService = false;
   try {
     const docService: any = req.scope.resolve("documents", { allowUnregistered: true });
-    if (docService) {
+    if (docService && typeof docService.deleteDocumentsForRepairTicket === "function") {
+      await docService.deleteDocumentsForRepairTicket(id, req.scope);
+      handledByDocService = true;
+    } else if (docService) {
       const records = await docService.listDocumentRecords({ repair_ticket_id: id }).catch(() => []);
       for (const rec of records) {
         await docService.deleteDocumentRecords(rec.id).catch(() => {});
       }
     }
-  } catch (_) {}
+  } catch (docErr: any) {
+    logger?.warn?.(`[Delete Documents] Error delegating cleanup to documents module: ${docErr.message}`);
+  }
+
+  // 2. Fallback Zoho Books cleanup if docService wasn't present or didn't handle it
+  if (!handledByDocService) {
+    try {
+      const settingsList = await repairService.listRepairSettings({});
+      const settings = settingsList?.[0];
+      if (
+        settings?.zoho_books_enabled &&
+        settings.zoho_client_id &&
+        settings.zoho_client_secret &&
+        settings.zoho_refresh_token &&
+        settings.zoho_organization_id
+      ) {
+        const zoho = new ZohoBooksService(
+          {
+            client_id: settings.zoho_client_id,
+            client_secret: settings.zoho_client_secret,
+            refresh_token: settings.zoho_refresh_token,
+            organization_id: settings.zoho_organization_id,
+            domain: settings.zoho_domain || "com",
+          },
+          logger as any
+        );
+
+        if (metadata.zoho_payment_id) {
+          try {
+            await zoho.deletePayment(metadata.zoho_payment_id);
+            logger.info(`[Delete Documents] Deleted Zoho payment: ${metadata.zoho_payment_id}`);
+          } catch (e: any) {
+            logger.warn(`[Delete Documents] Failed to delete Zoho payment: ${e.message}`);
+          }
+        }
+
+        if (metadata.zoho_invoice_id) {
+          try {
+            await zoho.deleteInvoice(metadata.zoho_invoice_id);
+            logger.info(`[Delete Documents] Deleted Zoho invoice: ${metadata.zoho_invoice_id}`);
+          } catch (e: any) {
+            logger.warn(`[Delete Documents] Failed to delete Zoho invoice: ${e.message}`);
+          }
+        }
+
+        if (metadata.zoho_estimate_id) {
+          try {
+            await zoho.deleteEstimate(metadata.zoho_estimate_id);
+            logger.info(`[Delete Documents] Deleted Zoho estimate: ${metadata.zoho_estimate_id}`);
+          } catch (e: any) {
+            logger.warn(`[Delete Documents] Failed to delete Zoho estimate: ${e.message}`);
+          }
+        }
+      }
+    } catch (err: any) {
+      logger.warn(`[Delete Documents] Zoho cleanup error: ${err.message}`);
+    }
+  }
 
   // 3. Clear ticket document metadata
   const updatedMetadata = { ...metadata };

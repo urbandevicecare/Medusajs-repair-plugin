@@ -39,6 +39,11 @@ export async function syncPaymentToZoho(
     const contactId = await zoho.syncContact(customerObj);
     
     const metadata = ticket.metadata || {};
+    if (metadata.zoho_payment_id) {
+      logger.info(`[Zoho Books] Payment already registered for ticket ${ticket.id} (${metadata.zoho_payment_id}), skipping duplicate.`);
+      return;
+    }
+
     let invId = metadata.zoho_invoice_id as string;
     if (!invId) {
       invId = await zoho.createInvoice(contactId, ticket);
