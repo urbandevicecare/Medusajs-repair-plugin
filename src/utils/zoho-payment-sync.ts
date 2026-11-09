@@ -11,7 +11,28 @@ export async function syncPaymentToZoho(
 ) {
   const repairService: RepairModuleService = container.resolve(REPAIR_MODULE);
   const ticket = await repairService.retrieveRepairTicket(ticketId);
-  
+
+  // 1. Centralize document & Zoho payment creation in medusajs-documents-plugin if present
+  try {
+    const docService: any = container.resolve("documents", { allowUnregistered: true });
+    if (docService) {
+      await docService.generateDocument(
+        {
+          type: "receipt",
+          repair_ticket_id: ticket.id,
+          total: Number(amount || ticket.total_actual || ticket.total_estimate || 0),
+          payment_reference: referenceNumber || (ticket.metadata as any)?.paystack_reference || (ticket.metadata as any)?.payment_reference,
+          payment_status: "paid",
+          auto_send: false,
+        },
+        container
+      );
+      return;
+    }
+  } catch (docErr: any) {
+    container.resolve("logger")?.warn?.(`[syncPaymentToZoho] Documents module delegation note: ${docErr.message}`);
+  }
+
   const [settings] = await repairService.listRepairSettings({});
   if (!settings?.zoho_books_enabled || !settings.zoho_client_id) {
     return;

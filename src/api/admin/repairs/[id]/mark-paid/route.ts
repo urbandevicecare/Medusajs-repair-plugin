@@ -67,6 +67,23 @@ export async function POST(req: MedusaRequest, res: MedusaResponse) {
   const updatedTicket = await repairService.updateRepairTickets(updates);
   
   try {
+    const { Modules } = await import("@medusajs/framework/utils");
+    const eventBus: any = req.scope.resolve(Modules.EVENT_BUS, { allowUnregistered: true });
+    if (eventBus) {
+      await eventBus.emit({
+        name: "repair.payment_received",
+        data: {
+          id,
+          repair_ticket_id: id,
+          amount: amountToPay,
+          reference,
+          payment_method: method || "Cash",
+        },
+      });
+    }
+  } catch (e) {}
+
+  try {
      // Trigger Zoho sync as a cash/manual payment
      await syncPaymentToZoho(req.scope as any, id, amountToPay, method || "Cash", reference);
   } catch(e) {

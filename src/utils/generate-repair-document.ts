@@ -999,6 +999,9 @@ export async function generateRepairDocument(
           ? `EST-${cleanTicketNumber}`
           : `RT-${cleanTicketNumber}`;
 
+      const isPaid = ticket.payment_status === "paid" || ticket.payment_status === "captured" || cleanType === "receipt";
+      const payRef = (ticket.metadata as any)?.paystack_reference || (ticket.metadata as any)?.payment_reference;
+
       const genRes = await docService.generateDocument({
         display_id: displayId,
         title:
@@ -1012,10 +1015,13 @@ export async function generateRepairDocument(
         type: typeFilter,
         repair_ticket_id: ticket.id,
         currency_code: ticket.currency_code || "KES",
-        customer_id: ticket.customer_id,
-        customer_name: customerName,
-        customer_email: ticket.customer_email,
-        customer_phone: ticket.customer_phone,
+        customer: {
+          name: customerName || "Valued Customer",
+          email: ticket.customer_email || undefined,
+          phone: ticket.customer_phone || undefined,
+        },
+        payment_status: isPaid ? "paid" : "unpaid",
+        payment_reference: payRef,
         total: Number(ticket.total_actual || ticket.total_estimate || 0),
         auto_send: false,
       }, req.scope);
