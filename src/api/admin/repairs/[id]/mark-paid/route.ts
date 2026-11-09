@@ -66,10 +66,12 @@ export async function POST(req: MedusaRequest, res: MedusaResponse) {
 
   const updatedTicket = await repairService.updateRepairTickets(updates);
   
+  let handledByDocumentsModule = false;
   try {
     const { Modules } = await import("@medusajs/framework/utils");
     const eventBus: any = req.scope.resolve(Modules.EVENT_BUS, { allowUnregistered: true });
-    if (eventBus) {
+    const docService: any = req.scope.resolve("documents", { allowUnregistered: true });
+    if (eventBus && docService) {
       await eventBus.emit({
         name: "repair.payment_received",
         data: {
@@ -80,14 +82,17 @@ export async function POST(req: MedusaRequest, res: MedusaResponse) {
           payment_method: method || "Cash",
         },
       });
+      handledByDocumentsModule = true;
     }
   } catch (e) {}
 
-  try {
-     // Trigger Zoho sync as a cash/manual payment
-     await syncPaymentToZoho(req.scope as any, id, amountToPay, method || "Cash", reference);
-  } catch(e) {
-     req.scope.resolve("logger").error(`[Mark Paid] Zoho sync failed: ${e}`);
+  if (!handledByDocumentsModule) {
+    try {
+      // Fallback: Trigger Zoho sync as a cash/manual payment if documents module is not active
+      await syncPaymentToZoho(req.scope as any, id, amountToPay, method || "Cash", reference);
+    } catch(e) {
+      req.scope.resolve("logger")?.error?.(`[Mark Paid] Zoho sync failed: ${e}`);
+    }
   }
   
   res.json({ repair_ticket: updatedTicket });

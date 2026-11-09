@@ -965,10 +965,11 @@ export async function generateRepairDocument(
   const cleanType = (docType || "job_card").toLowerCase().trim();
   const typeFilter = cleanType === "quote" ? "estimate" : cleanType;
 
-  // 1. Delegate entirely to medusajs-documents-plugin as the single source of truth
+  let docServicePresent = false;
   try {
     const docService: any = req.scope.resolve("documents", { allowUnregistered: true });
     if (docService) {
+      docServicePresent = true;
       // Check for existing document record first
       const docs = await docService.listDocumentRecords({
         repair_ticket_id: ticket.id,
@@ -1023,6 +1024,7 @@ export async function generateRepairDocument(
         payment_status: isPaid ? "paid" : "unpaid",
         payment_reference: payRef,
         total: Number(ticket.total_actual || ticket.total_estimate || 0),
+        force_source: "zoho",
         auto_send: false,
       }, req.scope);
 
@@ -1037,7 +1039,12 @@ export async function generateRepairDocument(
     logger?.warn?.(`[generateRepairDocument] Error delegating to documents module: ${docErr.message}`);
   }
 
-  // 3. Fallback Local PDFKit Generation if documents module is unregistered or failed
+  // 2. Centralized architecture: If documents module is registered, do not generate local PDF documents in repair app
+  if (docServicePresent) {
+    return res.status(500).json({ message: "Failed to generate document via documents plugin", error: "Generation failed" });
+  }
+
+  // 3. Fallback Local PDFKit Generation ONLY if documents module is completely unregistered in environment
   try {
     const pdfBuffer = await generateRepairPdfBuffer(cleanType, ticket, customerName, settings, storeUrl);
     res.setHeader("Content-Type", "application/pdf");

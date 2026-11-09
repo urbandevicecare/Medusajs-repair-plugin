@@ -540,4 +540,54 @@ test("Token Document Route: supports ticket lookup by ID and ticket number when 
   assert.ok(sentData instanceof Buffer, "Document output must be a Buffer");
 });
 
+test("Requirement: generateRepairDocument delegates to documents plugin with force_source: zoho", async () => {
+  const { generateRepairDocument } = await import("../src/utils/generate-repair-document.js");
+
+  let delegatedInput: any = null;
+  let sentData: any = null;
+  const mockRes: any = {
+    setHeader: () => {},
+    send: (data: any) => { sentData = data; },
+    status: () => mockRes,
+    json: (data: any) => { sentData = data; },
+  };
+
+  const mockTicket: any = {
+    id: "rep_ticket_del_01",
+    ticket_number: 9911,
+    status: "repairing",
+    payment_status: "unpaid",
+    total_estimate: 8500,
+    metadata: { paystack_payment_link: "https://paystack.com/pay/xyz" },
+  };
+
+  const mockDocService = {
+    listDocumentRecords: async () => [],
+    generateDocument: async (input: any) => {
+      delegatedInput = input;
+      return { pdfBuffer: Buffer.from("%PDF-1.4 mock delegated zoho invoice") };
+    },
+  };
+
+  const mockReq: any = {
+    scope: {
+      resolve: (key: string) => {
+        if (key === "repair") return { listRepairSettings: async () => [{}] };
+        if (key === "logger") return { info: () => {}, warn: () => {}, error: () => {} };
+        if (key === "documents") return mockDocService;
+        return null;
+      },
+    },
+  };
+
+  await generateRepairDocument("invoice", mockTicket, "John Doe", mockRes, mockReq);
+
+  assert.ok(delegatedInput, "generateDocument must be called on documents module");
+  assert.strictEqual(delegatedInput.force_source, "zoho", "Must pass force_source: 'zoho'");
+  assert.strictEqual(delegatedInput.type, "invoice");
+  assert.strictEqual(delegatedInput.repair_ticket_id, "rep_ticket_del_01");
+  assert.ok(sentData, "Must send generated PDF buffer from documents module");
+});
+
+
 
