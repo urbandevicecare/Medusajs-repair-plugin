@@ -18,7 +18,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: '24'
+          node-version: '20'
           registry-url: 'https://registry.npmjs.org/'
           cache: 'yarn'
 
@@ -64,9 +64,14 @@ jobs:
             assets/storefront-examples.zip
             assets/medusajs-repairshop-plugin-v${{ env.VERSION }}.tgz
 
-      # 7. Publish to npm using your secret token
+      # 8. Publish to npm using your secret token
       - name: Publish to npm
-        continue-on-error: true
-        run: npm publish --access public
+        run: |
+          if [ -n "${{ secrets.NPM_TOKEN }}" ]; then
+            echo "//registry.npmjs.org/:_authToken=${{ secrets.NPM_TOKEN }}" > ~/.npmrc
+            npm publish --access public
+          else
+            npm publish --access public
+          fi
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

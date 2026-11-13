@@ -48,8 +48,6 @@
     "@react-email/render": "^2.0.4",
     "@swc/core": "^1.7.28",
     "@types/node": "^20.0.0",
-    "@types/pdfkit": "^0.17.6",
-    "@types/qrcode": "^1.5.6",
     "@types/react": "^18.3.2",
     "@types/react-dom": "^18.2.25",
     "prop-types": "^15.8.1",
@@ -74,9 +72,6 @@
     "node": ">=20"
   },
   "dependencies": {
-    "pdf-lib": "^1.17.1",
-    "pdfkit": "^0.18.0",
-    "qrcode": "^1.5.4",
     "recharts": "^3.8.1"
   }
 }
