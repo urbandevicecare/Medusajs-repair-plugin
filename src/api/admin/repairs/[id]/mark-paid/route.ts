@@ -25,44 +25,78 @@ export async function POST(req: MedusaRequest, res: MedusaResponse) {
   const totalActual = parseNum(ticket.total_actual);
   const targetTotal = totalActual > 0 ? totalActual : totalEstimate;
   
-  const amountToPay = amount ? amount : targetTotal - parseNum(ticket.amount_paid);
-  
-  const newAmountPaid = parseNum(ticket.amount_paid) + amountToPay;
-  const isFullyPaid = newAmountPaid >= targetTotal;
+  const currentPaid = parseNum(ticket.amount_paid);
+  const remainingBalance = Math.max(0, targetTotal - currentPaid);
 
-  let newStatus = ticket.status;
-  const updates: any = {
-    id,
-    amount_paid: newAmountPaid,
-    payment_status: isFullyPaid ? "captured" : "pending",
-    payment_collection_id: reference || ticket.payment_collection_id
-  };
+  const body = (req.body as any) || {};
+  const isReset = body.action === "reset";
+
+  let newAmountPaid = 0;
+  let amountRecorded = 0;
+
+  if (isReset) {
+    newAmountPaid = 0;
+    amountRecorded = 0;
+  } else if (amount !== undefined && amount !== null) {
+    amountRecorded = Math.max(0, Number(amount));
+    newAmountPaid = currentPaid + amountRecorded;
+  } else {
+    amountRecorded = remainingBalance;
+    newAmountPaid = currentPaid + amountRecorded;
+  }
+
+  const isFullyPaid = !isReset && newAmountPaid >= targetTotal && targetTotal > 0;
+  const isPartiallyPaid = !isReset && !isFullyPaid && newAmountPaid > 0;
+
+  const paymentStatus = isFullyPaid ? "captured" : isPartiallyPaid ? "partially_paid" : "pending";
 
   const existingMetadata = (ticket.metadata as Record<string, any>) || {};
   const rawTags = existingMetadata.tags;
-  const existingTags: string[] = Array.isArray(rawTags)
+  let existingTags: string[] = Array.isArray(rawTags)
     ? [...rawTags]
     : typeof rawTags === "string"
     ? rawTags.split(",").map((t: string) => t.trim()).filter(Boolean)
     : [];
 
+  existingTags = existingTags.filter((t) => t !== "Paid" && t !== "Partially Paid" && t !== "Unpaid");
+
   if (isFullyPaid) {
-    if (!existingTags.includes("Paid")) {
-      existingTags.push("Paid");
-    }
-    if (ticket.status === "ready") {
-      newStatus = "collected";
-      updates.collected_at = new Date();
-    } else if (ticket.status === "awaiting_approval") {
-      newStatus = "repairing";
-    }
+    existingTags.push("Paid");
+  } else if (isPartiallyPaid) {
+    existingTags.push("Partially Paid");
   }
 
-  updates.status = newStatus;
-  updates.metadata = {
-    ...existingMetadata,
-    tags: existingTags,
+  const paymentHistory = Array.isArray(existingMetadata.payment_history)
+    ? [...existingMetadata.payment_history]
+    : [];
+
+  if (amountRecorded > 0) {
+    paymentHistory.push({
+      amount: amountRecorded,
+      method: method || "Cash",
+      reference: reference || "Direct Payment",
+      date: new Date().toISOString(),
+    });
+  }
+
+  const updates: any = {
+    id,
+    amount_paid: newAmountPaid,
+    payment_status: paymentStatus,
+    payment_collection_id: isReset ? null : (reference || ticket.payment_collection_id),
+    metadata: {
+      ...existingMetadata,
+      tags: existingTags,
+      payment_history: isReset ? [] : paymentHistory,
+      last_payment_method: isReset ? null : (method || "Cash"),
+      last_payment_reference: isReset ? null : (reference || ""),
+    },
   };
+
+  // If ticket was awaiting_approval and has been paid/partially paid, can move to repairing
+  if (!isReset && ticket.status === "awaiting_approval" && (isFullyPaid || isPartiallyPaid)) {
+    updates.status = "repairing";
+  }
 
   const updatedTicket = await repairService.updateRepairTickets(updates);
   
@@ -71,14 +105,14 @@ export async function POST(req: MedusaRequest, res: MedusaResponse) {
     const { Modules } = await import("@medusajs/framework/utils");
     const eventBus: any = req.scope.resolve(Modules.EVENT_BUS, { allowUnregistered: true });
     const docService: any = req.scope.resolve("documents", { allowUnregistered: true });
-    if (eventBus && docService) {
+    if (amountRecorded > 0 && eventBus && docService) {
       await eventBus.emit({
         name: "repair.payment_received",
         data: {
           id,
           repair_ticket_id: id,
-          amount: amountToPay,
-          reference,
+          amount: amountRecorded,
+          reference: reference || "Direct Payment",
           payment_method: method || "Cash",
         },
       });
@@ -86,14 +120,26 @@ export async function POST(req: MedusaRequest, res: MedusaResponse) {
     }
   } catch (e) {}
 
-  if (!handledByDocumentsModule) {
+  if (!handledByDocumentsModule && amountRecorded > 0) {
     try {
       // Fallback: Trigger Zoho sync as a cash/manual payment if documents module is not active
-      await syncPaymentToZoho(req.scope as any, id, amountToPay, method || "Cash", reference);
+      await syncPaymentToZoho(req.scope as any, id, amountRecorded, method || "Cash", reference);
     } catch(e) {
       req.scope.resolve("logger")?.error?.(`[Mark Paid] Zoho sync failed: ${e}`);
     }
   }
   
-  res.json({ repair_ticket: updatedTicket });
+  res.json({
+    message: isReset
+      ? "Payment reset successfully"
+      : isFullyPaid
+      ? "Repair ticket marked as fully paid"
+      : isPartiallyPaid
+      ? `Recorded partial payment of ${amountRecorded}. Remaining balance: ${Math.max(0, targetTotal - newAmountPaid)}`
+      : "Payment recorded",
+    repair_ticket: updatedTicket,
+    amount_paid: newAmountPaid,
+    payment_status: paymentStatus,
+    remaining_balance: Math.max(0, targetTotal - newAmountPaid),
+  });
 }

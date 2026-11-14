@@ -739,11 +739,15 @@ const RepairsPage = () => {
                       <Badge color="green" size="small">
                         Paid
                       </Badge>
-                    ) : (ticket.status === "completed" || ticket.status === "collected") ? (
+                    ) : (ticket.payment_status === "partially_paid" || (Array.isArray(ticket.metadata?.tags) && ticket.metadata?.tags.includes("Partially Paid"))) ? (
+                      <Badge color="orange" size="small">
+                        Partially Paid
+                      </Badge>
+                    ) : (
                       <Badge color="red" size="small">
                         Unpaid
                       </Badge>
-                    ) : null}
+                    )}
                   </div>
                 </Table.Cell>
                 <Table.Cell>

@@ -94,7 +94,11 @@ export async function generateRepairDocument(
         ? `EST-${cleanTicketNumber}`
         : `RT-${cleanTicketNumber}`;
 
-    const isPaid = ticket.payment_status === "paid" || ticket.payment_status === "captured" || cleanType === "receipt";
+    const amountPaidNum = Number(ticket.amount_paid || 0);
+    const isPaid = ticket.payment_status === "paid" || ticket.payment_status === "captured" || amountPaidNum > 0;
+    if (cleanType === "receipt" && !isPaid && amountPaidNum <= 0) {
+      throw new Error(`Cannot generate receipt for unpaid repair ticket #${ticket.ticket_number}.`);
+    }
     const payRef = (ticket.metadata as any)?.paystack_reference || (ticket.metadata as any)?.payment_reference;
 
     const genRes = await docService.generateDocument({
@@ -121,7 +125,8 @@ export async function generateRepairDocument(
       },
       payment_status: isPaid ? "paid" : "unpaid",
       payment_reference: payRef,
-      total: Number(ticket.total_actual || ticket.total_estimate || 0),
+      total: cleanType === "receipt" ? (amountPaidNum > 0 ? amountPaidNum : Number(ticket.total_actual || ticket.total_estimate || 0)) : Number(ticket.total_actual || ticket.total_estimate || 0),
+      amount_paid: amountPaidNum,
       force_source: "zoho",
       auto_send: false,
     }, req.scope);

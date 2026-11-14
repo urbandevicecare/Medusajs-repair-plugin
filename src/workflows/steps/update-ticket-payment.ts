@@ -48,32 +48,34 @@ export const updateTicketPaymentStep = createStep(
       collected_at: ticket.collected_at,
     };
 
+    const isPartiallyPaid = !isFullyPaid && newAmountPaid > 0;
+    const paymentStatus = isFullyPaid ? "captured" : isPartiallyPaid ? "partially_paid" : "pending";
+
     let newStatus = ticket.status;
     const updatePayload: any = {
       id: ticket.id,
       amount_paid: newAmountPaid,
-      payment_status: isFullyPaid ? "captured" : "pending",
+      payment_status: paymentStatus,
       payment_collection_id: input.reference
     };
 
     const existingMetadata = (ticket.metadata as Record<string, any>) || {};
     const rawTags = existingMetadata.tags;
-    const existingTags: string[] = Array.isArray(rawTags)
+    let existingTags: string[] = Array.isArray(rawTags)
       ? [...rawTags]
       : typeof rawTags === "string"
       ? rawTags.split(",").map((t: string) => t.trim()).filter(Boolean)
       : [];
 
+    existingTags = existingTags.filter((t) => t !== "Paid" && t !== "Partially Paid" && t !== "Unpaid");
+
     if (isFullyPaid) {
-      if (!existingTags.includes("Paid")) {
-        existingTags.push("Paid");
-      }
-      if (ticket.status === "ready") {
-        newStatus = "collected";
-        updatePayload.collected_at = new Date();
-      } else if (ticket.status === "awaiting_approval") {
+      existingTags.push("Paid");
+      if (ticket.status === "awaiting_approval") {
         newStatus = "repairing";
       }
+    } else if (isPartiallyPaid) {
+      existingTags.push("Partially Paid");
     }
 
     updatePayload.status = newStatus;

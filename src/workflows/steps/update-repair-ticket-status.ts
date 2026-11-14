@@ -51,15 +51,6 @@ export const updateRepairTicketStatusStep = createStep(
       ...updateData,
     });
 
-    if (input.status === "completed" && !(currentTicket.metadata?.zoho_payment_id)) {
-      const { syncPaymentToZoho } = await import("../../utils/zoho-payment-sync.js");
-      try {
-        await syncPaymentToZoho(container as any, currentTicket.id, currentTicket.total_estimate, "Cash");
-      } catch (e: any) {
-        container.resolve("logger").error(`[Zoho Books] Failed to sync payment on completion: ${e.message}`);
-      }
-    }
-
     if (input.status === "cancelled") {
       try {
         const docService: any = container.resolve("documents", { allowUnregistered: true });

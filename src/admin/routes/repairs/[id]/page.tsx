@@ -10,6 +10,7 @@ import {
   Select,
   Toaster,
   toast,
+  FocusModal,
 } from "@medusajs/ui";
 import { useEffect, useState } from "react";
 import {
@@ -43,6 +44,7 @@ type RepairTicket = {
   parts_actual: number;
   labor_actual: number;
   total_actual: number;
+  amount_paid?: number;
   is_approved: boolean;
   approved_at?: string;
   payment_status: string;
@@ -125,6 +127,11 @@ const RepairDetailPage = () => {
   const [isSendingReminder, setIsSendingReminder] = useState(false);
   const [isResettingDocs, setIsResettingDocs] = useState(false);
   const [isPushingStk, setIsPushingStk] = useState(false);
+  const [paymentModalOpen, setPaymentModalOpen] = useState(false);
+  const [paymentAmount, setPaymentAmount] = useState("");
+  const [paymentMethod, setPaymentMethod] = useState("Cash");
+  const [paymentReference, setPaymentReference] = useState("");
+  const [isSubmittingPayment, setIsSubmittingPayment] = useState(false);
 
   useEffect(() => {
     const delayDebounceFn = setTimeout(() => {
@@ -172,6 +179,7 @@ const RepairDetailPage = () => {
       t.labor_actual = parseNum(t.labor_actual);
       t.parts_actual = parseNum(t.parts_actual);
       t.total_actual = parseNum(t.total_actual);
+      t.amount_paid = parseNum(t.amount_paid);
       t.custom_parts = t.custom_parts || [];
 
       setTicket(t);
@@ -324,24 +332,69 @@ const RepairDetailPage = () => {
     }
   };
 
-  const handleMarkPaid = async () => {
-    const reference = window.prompt("Enter payment reference (e.g. Cash Receipt, M-PESA Code). Leave blank if none:", "Cash");
-    if (reference === null) return; // User cancelled
+  const openPaymentModal = () => {
+    if (!ticket) return;
+    const remaining = Math.max(0, (ticket.total_estimate || 0) - (ticket.amount_paid || 0));
+    setPaymentAmount(remaining > 0 ? remaining.toString() : (ticket.total_estimate || 0).toString());
+    setPaymentMethod("Cash");
+    setPaymentReference("");
+    setPaymentModalOpen(true);
+  };
 
-    if (!confirm("Are you sure you want to mark this ticket as Paid? This will sync the payment to Zoho Books.")) return;
+  const handleRecordPayment = async (amountToPay?: number, methodToUse?: string, refToUse?: string) => {
+    const amt = amountToPay !== undefined ? amountToPay : parseFloat(paymentAmount);
+    if (isNaN(amt) || amt <= 0) {
+      toast.error("Please enter a valid payment amount greater than 0");
+      return;
+    }
 
     try {
+      setIsSubmittingPayment(true);
       const response = await fetch(`/admin/repairs/${id}/mark-paid`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ method: reference ? "Cash/Other" : "Cash", reference })
+        credentials: "include",
+        body: JSON.stringify({
+          amount: amt,
+          method: methodToUse || paymentMethod || "Cash",
+          reference: refToUse !== undefined ? refToUse : paymentReference,
+        }),
       });
       const data = await response.json();
-      if (!response.ok) throw new Error(data.message || "Failed to mark paid");
-      toast.success("Successfully marked as paid and synced to Zoho Books!");
+      if (!response.ok) throw new Error(data.message || "Failed to record payment");
+      toast.success(
+        data.payment_status === "captured"
+          ? "Payment recorded in full and synced to Zoho Books!"
+          : "Partial payment recorded and synced to Zoho Books!"
+      );
+      setPaymentModalOpen(false);
       loadTicket();
     } catch (e: any) {
       toast.error("Error: " + e.message);
+    } finally {
+      setIsSubmittingPayment(false);
+    }
+  };
+
+  const handleResetPayment = async () => {
+    if (!confirm("Are you sure you want to reset this ticket's payment status to Unpaid? This will clear amount paid.")) return;
+    try {
+      setIsSubmittingPayment(true);
+      const response = await fetch(`/admin/repairs/${id}/mark-paid`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ action: "reset" }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.message || "Failed to reset payment");
+      toast.success("Payment status reset to Unpaid");
+      setPaymentModalOpen(false);
+      loadTicket();
+    } catch (e: any) {
+      toast.error("Error: " + e.message);
+    } finally {
+      setIsSubmittingPayment(false);
     }
   };
 
@@ -590,8 +643,12 @@ const RepairDetailPage = () => {
               {ticket.technician_name && (
                 <Badge color="purple">{ticket.technician_name}</Badge>
               )}
-              {(ticket.payment_status === "captured" || ticket.payment_status === "paid" || (Array.isArray(ticket.metadata?.tags) && ticket.metadata?.tags.includes("Paid"))) && (
+              {(ticket.payment_status === "captured" || ticket.payment_status === "paid" || (Array.isArray(ticket.metadata?.tags) && ticket.metadata?.tags.includes("Paid"))) ? (
                 <Badge color="green">Paid</Badge>
+              ) : (ticket.payment_status === "partially_paid" || (Array.isArray(ticket.metadata?.tags) && ticket.metadata?.tags.includes("Partially Paid")) || (ticket.amount_paid || 0) > 0) ? (
+                <Badge color="orange">Partially Paid ({formatCurrency(ticket.amount_paid || 0)})</Badge>
+              ) : (
+                <Badge color="red">Unpaid</Badge>
               )}
             </div>
             {ticket.device && (
@@ -746,9 +803,12 @@ const RepairDetailPage = () => {
                 <div className="relative">
                   <div className="flex justify-between items-center mb-1">
                     <span className="text-[10px] uppercase font-semibold text-ui-fg-muted tracking-wider block">Status</span>
-                    {(ticket?.status === "completed" || ticket?.status === "collected") && 
-                     ticket?.payment_status !== "captured" && ticket?.payment_status !== "paid" && (
-                      <span className="text-[9px] font-bold px-1 py-0.5 bg-red-100 text-red-700 rounded-sm leading-none">UNPAID</span>
+                    {ticket?.payment_status === "captured" || ticket?.payment_status === "paid" || (Array.isArray(ticket?.metadata?.tags) && ticket?.metadata?.tags.includes("Paid")) ? (
+                      <span className="text-[9px] font-bold px-1.5 py-0.5 bg-green-100 text-green-700 rounded-sm leading-none">PAID</span>
+                    ) : ticket?.payment_status === "partially_paid" || (Array.isArray(ticket?.metadata?.tags) && ticket?.metadata?.tags.includes("Partially Paid")) || (ticket?.amount_paid || 0) > 0 ? (
+                      <span className="text-[9px] font-bold px-1.5 py-0.5 bg-orange-100 text-orange-700 rounded-sm leading-none">PARTIAL</span>
+                    ) : (
+                      <span className="text-[9px] font-bold px-1.5 py-0.5 bg-red-100 text-red-700 rounded-sm leading-none">UNPAID</span>
                     )}
                   </div>
                   <div className="flex items-center border border-ui-border-base rounded-md overflow-hidden bg-ui-bg-base focus-within:ring-2 focus-within:ring-ui-fg-interactive transition-all">
@@ -1032,35 +1092,58 @@ const RepairDetailPage = () => {
                 <Text>{formatCurrency(ticket.total_estimate)}</Text>
               </div>
 
-              {ticket.payment_status !== "paid" && ticket.payment_status !== "captured" && ticket.status !== "cancelled" && (
-                <div className="mt-4 pt-3 border-t grid grid-cols-2 gap-2">
-                  <button 
-                    onClick={handleStkPush}
-                    disabled={loading || isPushingStk}
-                    className="py-1.5 text-[11px] uppercase tracking-wider font-semibold text-ui-fg-interactive bg-ui-bg-subtle hover:bg-ui-bg-subtle-hover rounded-md transition-colors disabled:opacity-50"
-                  >
-                    {isPushingStk ? "Pushing..." : "Push STK"}
-                  </button>
-                  <button 
-                    onClick={handleMarkPaid}
-                    disabled={loading}
-                    className="py-1.5 text-[11px] uppercase tracking-wider font-semibold text-ui-fg-base bg-ui-bg-subtle hover:bg-ui-bg-subtle-hover rounded-md transition-colors disabled:opacity-50"
-                  >
-                    Mark Paid (Cash)
-                  </button>
+              {((ticket.amount_paid || 0) > 0 || ticket.payment_status === "captured" || ticket.payment_status === "paid") && (
+                <div className="space-y-1 pt-1">
+                  <div className="flex justify-between text-sm text-green-700">
+                    <Text>Amount Paid:</Text>
+                    <Text className="font-semibold">{formatCurrency(ticket.amount_paid || 0)}</Text>
+                  </div>
+                  {Math.max(0, (ticket.total_estimate || 0) - (ticket.amount_paid || 0)) > 0 && (
+                    <div className="flex justify-between text-sm text-red-600 font-semibold">
+                      <Text>Balance Due:</Text>
+                      <Text>{formatCurrency(Math.max(0, (ticket.total_estimate || 0) - (ticket.amount_paid || 0)))}</Text>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {ticket.status !== "cancelled" && (
+                <div className="mt-4 pt-3 border-t space-y-2">
+                  <div className="grid grid-cols-2 gap-2">
+                    {ticket.payment_status !== "paid" && ticket.payment_status !== "captured" && (
+                      <button 
+                        onClick={handleStkPush}
+                        disabled={loading || isPushingStk}
+                        className="py-1.5 text-[11px] uppercase tracking-wider font-semibold text-ui-fg-interactive bg-ui-bg-subtle hover:bg-ui-bg-subtle-hover rounded-md transition-colors disabled:opacity-50"
+                      >
+                        {isPushingStk ? "Pushing..." : "Push STK"}
+                      </button>
+                    )}
+                    <button 
+                      onClick={openPaymentModal}
+                      disabled={loading}
+                      className={`py-1.5 text-[11px] uppercase tracking-wider font-semibold text-ui-fg-base bg-ui-bg-subtle hover:bg-ui-bg-subtle-hover rounded-md transition-colors disabled:opacity-50 ${ticket.payment_status === "paid" || ticket.payment_status === "captured" ? "col-span-2" : ""}`}
+                    >
+                      {ticket.payment_status === "paid" || ticket.payment_status === "captured"
+                        ? "Manage / Reset Payment"
+                        : (ticket.amount_paid || 0) > 0
+                        ? "Record Payment / Add Cash"
+                        : "Record Payment (Cash/Card)"}
+                    </button>
+                  </div>
                 </div>
               )}
 
               {ticket.is_approved ? (
                 <div className="mt-4 pt-3 border-t">
                   <div className="flex justify-between items-center">
-                    <Text className="text-[10px] uppercase font-semibold text-ui-fg-muted tracking-wider">Status / Paid</Text>
+                    <Text className="text-[10px] uppercase font-semibold text-ui-fg-muted tracking-wider">Status / Payment</Text>
                     <div className="flex items-center gap-2">
                       <span className="text-[9px] uppercase font-bold text-ui-fg-muted tracking-wider">
                         APPR: {new Date(ticket.approved_at!).toLocaleDateString()}
                       </span>
-                      <span className={`text-[9px] uppercase font-bold px-1.5 py-0.5 rounded-sm leading-none tracking-wider ${ticket.payment_status === "paid" || ticket.payment_status === "captured" ? 'bg-green-100 text-green-700' : 'bg-orange-100 text-orange-700'}`}>
-                        {ticket.payment_status}
+                      <span className={`text-[9px] uppercase font-bold px-1.5 py-0.5 rounded-sm leading-none tracking-wider ${ticket.payment_status === "paid" || ticket.payment_status === "captured" ? 'bg-green-100 text-green-700' : ticket.payment_status === 'partially_paid' || (ticket.amount_paid || 0) > 0 ? 'bg-orange-100 text-orange-700' : 'bg-red-100 text-red-700'}`}>
+                        {ticket.payment_status === "captured" || ticket.payment_status === "paid" ? "PAID" : ticket.payment_status === "partially_paid" || (ticket.amount_paid || 0) > 0 ? "PARTIAL" : "UNPAID"}
                       </span>
                     </div>
                   </div>
@@ -1236,6 +1319,149 @@ const RepairDetailPage = () => {
 
           </div></div>
       </div>
+
+      <FocusModal open={paymentModalOpen} onOpenChange={setPaymentModalOpen}>
+        <FocusModal.Content>
+          <FocusModal.Header>
+            <div className="flex items-center gap-2">
+              <Button
+                variant="primary"
+                onClick={() => handleRecordPayment()}
+                isLoading={isSubmittingPayment}
+              >
+                Confirm Payment
+              </Button>
+            </div>
+          </FocusModal.Header>
+          <FocusModal.Body className="flex flex-col items-center py-12 overflow-y-auto">
+            <div className="flex w-full max-w-lg flex-col gap-y-6">
+              <div>
+                <Heading>Record Payment</Heading>
+                <p className="text-ui-fg-subtle text-sm">
+                  Record cash, card, M-Pesa, or partial payment for ticket {ticket.ticket_number}.
+                </p>
+              </div>
+
+              <div className="bg-ui-bg-subtle p-4 rounded-lg flex justify-between items-center border border-ui-border-base">
+                <div>
+                  <Text className="text-xs text-ui-fg-muted uppercase font-semibold">Total Cost</Text>
+                  <Text className="text-base font-medium">{formatCurrency(ticket.total_estimate)}</Text>
+                </div>
+                <div>
+                  <Text className="text-xs text-ui-fg-muted uppercase font-semibold">Amount Paid</Text>
+                  <Text className="text-base font-medium text-green-600">{formatCurrency(ticket.amount_paid || 0)}</Text>
+                </div>
+                <div>
+                  <Text className="text-xs text-ui-fg-muted uppercase font-semibold">Balance Due</Text>
+                  <Text className="text-base font-bold text-ui-fg-base">
+                    {formatCurrency(Math.max(0, (ticket.total_estimate || 0) - (ticket.amount_paid || 0)))}
+                  </Text>
+                </div>
+              </div>
+
+              <div className="space-y-4">
+                <div>
+                  <div className="flex justify-between items-center mb-1">
+                    <Label htmlFor="payment-amount">Payment Amount</Label>
+                    <button
+                      type="button"
+                      className="text-xs text-ui-fg-interactive font-medium hover:underline cursor-pointer"
+                      onClick={() => setPaymentAmount(Math.max(0, (ticket.total_estimate || 0) - (ticket.amount_paid || 0)).toString())}
+                    >
+                      Pay Full Balance
+                    </button>
+                  </div>
+                  <Input
+                    id="payment-amount"
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    placeholder="Enter amount"
+                    value={paymentAmount}
+                    onChange={(e) => setPaymentAmount(e.target.value)}
+                  />
+                </div>
+
+                <div>
+                  <Label htmlFor="payment-method">Payment Method</Label>
+                  <select
+                    id="payment-method"
+                    value={paymentMethod}
+                    onChange={(e) => setPaymentMethod(e.target.value)}
+                    className="w-full mt-1 border border-ui-border-base rounded-md px-3 py-2 text-sm bg-ui-bg-base text-ui-fg-base focus:ring-2 focus:ring-ui-fg-interactive outline-none cursor-pointer"
+                  >
+                    <option value="Cash">Cash</option>
+                    <option value="M-Pesa">M-Pesa</option>
+                    <option value="Card">Card / POS</option>
+                    <option value="Bank Transfer">Bank Transfer</option>
+                    <option value="Other">Other</option>
+                  </select>
+                </div>
+
+                <div>
+                  <Label htmlFor="payment-reference">Payment Reference / Note (Optional)</Label>
+                  <Input
+                    id="payment-reference"
+                    type="text"
+                    placeholder="e.g. Cash Receipt #, M-Pesa transaction code, note"
+                    value={paymentReference}
+                    onChange={(e) => setPaymentReference(e.target.value)}
+                  />
+                </div>
+              </div>
+
+              {Array.isArray(ticket?.metadata?.payment_history) && ticket.metadata.payment_history.length > 0 && (
+                <div className="border-t pt-4">
+                  <Text className="text-xs uppercase font-semibold text-ui-fg-muted mb-2 block">
+                    Payment History
+                  </Text>
+                  <div className="space-y-2">
+                    {ticket.metadata.payment_history.map((hist: any, idx: number) => (
+                      <div key={idx} className="flex justify-between items-center text-xs p-2 bg-ui-bg-subtle rounded border border-ui-border-base">
+                        <div>
+                          <span className="font-semibold text-ui-fg-base">{formatCurrency(hist.amount)}</span>
+                          <span className="text-ui-fg-muted ml-2">via {hist.method || "Cash"}</span>
+                          {hist.reference && <span className="text-ui-fg-muted font-mono text-[11px] ml-2">({hist.reference})</span>}
+                        </div>
+                        <span className="text-ui-fg-muted">{new Date(hist.date).toLocaleDateString()}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              <div className="flex items-center justify-between pt-4 border-t">
+                {(ticket.amount_paid || 0) > 0 && (
+                  <Button
+                    variant="danger"
+                    size="small"
+                    onClick={handleResetPayment}
+                    isLoading={isSubmittingPayment}
+                  >
+                    Reset Payment to Unpaid
+                  </Button>
+                )}
+                <div className="flex gap-2 ml-auto">
+                  <Button
+                    variant="secondary"
+                    onClick={() => setPaymentModalOpen(false)}
+                    disabled={isSubmittingPayment}
+                  >
+                    Cancel
+                  </Button>
+                  <Button
+                    variant="primary"
+                    onClick={() => handleRecordPayment()}
+                    isLoading={isSubmittingPayment}
+                  >
+                    Record Payment
+                  </Button>
+                </div>
+              </div>
+            </div>
+          </FocusModal.Body>
+        </FocusModal.Content>
+      </FocusModal>
     </div>
   );
 };

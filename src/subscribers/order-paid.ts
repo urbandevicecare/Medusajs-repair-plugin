@@ -78,7 +78,33 @@ export default async function handleOrderPaid({
     }
   }
 
-  const amount = order.total || ticket.total_actual || ticket.total_estimate;
+  const amount = Number(order.total || ticket.total_actual || ticket.total_estimate || 0);
+
+  // Update repair ticket payment status and tag
+  try {
+    const existingMetadata = (ticket.metadata as Record<string, any>) || {};
+    const rawTags = existingMetadata.tags;
+    let existingTags: string[] = Array.isArray(rawTags)
+      ? [...rawTags]
+      : typeof rawTags === "string"
+      ? rawTags.split(",").map((t: string) => t.trim()).filter(Boolean)
+      : [];
+
+    existingTags = existingTags.filter((t) => t !== "Paid" && t !== "Partially Paid" && t !== "Unpaid");
+    existingTags.push("Paid");
+
+    await repairService.updateRepairTickets({
+      id: ticket.id,
+      payment_status: "captured",
+      amount_paid: amount,
+      metadata: {
+        ...existingMetadata,
+        tags: existingTags,
+      },
+    });
+  } catch (err: any) {
+    container.resolve("logger")?.warn?.(`[handleOrderPaid] Failed to update ticket payment status: ${err?.message || err}`);
+  }
 
   // 1. Emit repair.payment_received event so medusajs-documents-plugin handles receipt & Zoho sync
   try {

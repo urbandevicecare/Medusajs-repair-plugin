@@ -192,12 +192,14 @@ export default async function globalNotificationHandler({
       // DOCUMENT LINK HANDOVER & RESOLUTION
       // ---------------------------------------------------------
       let expectedType: string | undefined = undefined;
-      if (eventName === "repair.payment_received" || ticket.payment_status === "captured" || ticket.payment_status === "paid") {
+      if (eventName === "repair.payment_received") {
         expectedType = "receipt";
       } else if (eventName === "repair.created" || rawStatus === "received") {
         expectedType = "job_card";
       } else if (rawStatus === "awaiting_approval") {
         expectedType = "estimate";
+      } else if (["repairing", "ready", "completed", "collected", "repaired"].includes(rawStatus)) {
+        expectedType = "invoice";
       }
 
       let pdfUrl = "";
@@ -246,7 +248,7 @@ export default async function globalNotificationHandler({
       if (!pdfUrl && ticket.approval_token) {
         let docTypeParam = "invoice";
         if (eventName === "repair.created" || rawStatus === "received") docTypeParam = "job_card";
-        else if (eventName === "repair.payment_received" || ticket.payment_status === "captured" || ticket.payment_status === "paid" || rawStatus === "completed") docTypeParam = "receipt";
+        else if (eventName === "repair.payment_received") docTypeParam = "receipt";
         else if (rawStatus === "awaiting_approval") docTypeParam = "quote";
 
         pdfUrl = `${storeUrl}/api/repairs/token/${ticket.approval_token}/document?type=${docTypeParam}`;
