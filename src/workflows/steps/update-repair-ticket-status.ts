@@ -61,32 +61,24 @@ export const updateRepairTicketStatusStep = createStep(
     }
 
     if (input.status === "cancelled") {
-      const [settings] = await repairService.listRepairSettings({});
-      if (settings?.zoho_books_enabled && settings.zoho_client_id) {
-        try {
-          const logger = container.resolve("logger");
-          const { ZohoBooksService } = await import("../../services/zoho-books.js");
-          const zoho = new ZohoBooksService({
-            client_id: settings.zoho_client_id,
-            client_secret: settings.zoho_client_secret!,
-            refresh_token: settings.zoho_refresh_token!,
-            organization_id: settings.zoho_organization_id!,
-            domain: settings.zoho_domain || "com",
-          }, logger);
-          
-          const metadata = currentTicket.metadata || {};
-          if (metadata.zoho_estimate_id) await zoho.deleteEstimate(metadata.zoho_estimate_id as string);
-          if (metadata.zoho_invoice_id) await zoho.deleteInvoice(metadata.zoho_invoice_id as string);
-          
-          // clear from metadata
-          const newMeta = { ...metadata };
-          delete newMeta.zoho_estimate_id;
-          delete newMeta.zoho_invoice_id;
-          await repairService.updateRepairTickets({ id: input.repair_ticket_id, metadata: newMeta });
-        } catch (e: any) {
-          container.resolve("logger").error(`[Zoho Books] Failed to delete records: ${e.message}`);
+      try {
+        const docService: any = container.resolve("documents", { allowUnregistered: true });
+        if (docService && typeof docService.deleteDocumentsForRepairTicket === "function") {
+          await docService.deleteDocumentsForRepairTicket(input.repair_ticket_id, container);
         }
+      } catch (e: any) {
+        container.resolve("logger")?.warn?.(`[updateRepairTicketStatusStep] Failed to delegate document deletion: ${e.message}`);
       }
+
+      // Clear document references from metadata
+      const metadata = currentTicket.metadata || {};
+      const newMeta = { ...metadata };
+      delete newMeta.zoho_estimate_id;
+      delete newMeta.zoho_invoice_id;
+      delete newMeta.zoho_payment_id;
+      delete newMeta.pdf_url;
+      delete newMeta.last_document_generated;
+      await repairService.updateRepairTickets({ id: input.repair_ticket_id, metadata: newMeta });
     }
 
     return new StepResponse(updatedTicket, {

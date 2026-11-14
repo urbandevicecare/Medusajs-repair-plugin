@@ -1,6 +1,5 @@
 import { createStep, StepResponse } from "@medusajs/framework/workflows-sdk";
 import { Modules } from "@medusajs/framework/utils";
-import { syncPaymentToZoho } from "../../utils/zoho-payment-sync.js";
 
 type SyncPaymentZohoInput = {
   ticket_id: string;
@@ -29,14 +28,7 @@ export const syncPaymentZohoStep = createStep(
       container.resolve("logger")?.warn?.(`[sync-payment-zoho] Failed to emit repair.payment_received: ${e}`);
     }
 
-    // 2. Fallback: If medusajs-documents-plugin is not registered, run legacy sync
-    try {
-      const docModule = container.resolve("documents", { allowUnregistered: true });
-      if (!docModule) {
-        await syncPaymentToZoho(container as any, input.ticket_id, input.amount, "Paystack", input.reference);
-      }
-    } catch (e) {}
-
     return new StepResponse(true);
   }
 );
+

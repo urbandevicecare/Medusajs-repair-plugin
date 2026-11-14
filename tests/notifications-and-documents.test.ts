@@ -624,5 +624,132 @@ test("Requirement: generateRepairDocument delegates to documents plugin with for
   assert.ok(sentData, "Must send generated PDF buffer from documents module");
 });
 
+test("Requirement: syncPaymentToZoho delegates receipt generation to documents module without fallback", async () => {
+  const { syncPaymentToZoho } = await import("../src/utils/zoho-payment-sync.js");
 
+  let generatedReceiptInput: any = null;
+  let warnLogged = false;
 
+  const mockTicket = {
+    id: "rep_ticket_pay_01",
+    total_actual: 5000,
+    total_estimate: 5000,
+    metadata: { paystack_reference: "PSTK_SYNC_123" },
+  };
+
+  const mockContainerWithDocs: any = {
+    resolve: (key: string) => {
+      if (key === "repair") {
+        return {
+          retrieveRepairTicket: async () => mockTicket,
+          listRepairSettings: async () => [{}],
+        };
+      }
+      if (key === "documents") {
+        return {
+          generateDocument: async (input: any) => {
+            generatedReceiptInput = input;
+            return { id: "doc_rcpt_01" };
+          },
+        };
+      }
+      if (key === "logger") {
+        return { info: () => {}, warn: () => {}, error: () => {} };
+      }
+      return null;
+    },
+  };
+
+  await syncPaymentToZoho(mockContainerWithDocs, "rep_ticket_pay_01", 5000, "Paystack", "PSTK_SYNC_123");
+
+  assert.ok(generatedReceiptInput, "Must delegate receipt generation to documents module");
+  assert.strictEqual(generatedReceiptInput.type, "receipt");
+  assert.strictEqual(generatedReceiptInput.repair_ticket_id, "rep_ticket_pay_01");
+  assert.strictEqual(generatedReceiptInput.payment_reference, "PSTK_SYNC_123");
+  assert.strictEqual(generatedReceiptInput.payment_status, "paid");
+
+  // When documents module is absent: no local fallback, logs warning cleanly
+  const mockContainerNoDocs: any = {
+    resolve: (key: string) => {
+      if (key === "repair") {
+        return {
+          retrieveRepairTicket: async () => mockTicket,
+          listRepairSettings: async () => [{}],
+        };
+      }
+      if (key === "logger") {
+        return {
+          info: () => {},
+          warn: (msg: string) => {
+            if (msg.includes("Documents module is not registered")) warnLogged = true;
+          },
+          error: () => {},
+        };
+      }
+      return null;
+    },
+  };
+
+  await syncPaymentToZoho(mockContainerNoDocs, "rep_ticket_pay_01", 5000, "Paystack", "PSTK_SYNC_123");
+  assert.strictEqual(warnLogged, true, "Must log warning and skip without local fallback when documents module is missing");
+});
+
+test("Requirement: DELETE /admin/repairs/:id/document delegates to documents module and clears metadata", async () => {
+  const { DELETE: deleteHandler } = await import("../src/api/admin/repairs/[id]/document/route.js");
+
+  let deletedTicketId: string | null = null;
+  let updatedMeta: any = null;
+  let jsonResponse: any = null;
+
+  const mockTicket = {
+    id: "rep_ticket_del_test",
+    metadata: {
+      zoho_invoice_id: "inv_123",
+      zoho_payment_id: "pay_123",
+      zoho_estimate_id: "est_123",
+      pdf_url: "https://example.com/invoice.pdf",
+    },
+  };
+
+  const mockRes: any = {
+    json: (data: any) => { jsonResponse = data; return mockRes; },
+  };
+
+  const mockReq: any = {
+    params: { id: "rep_ticket_del_test" },
+    scope: {
+      resolve: (key: string) => {
+        if (key === "repair") {
+          return {
+            listRepairTickets: async () => [mockTicket],
+            updateRepairTickets: async (data: any) => {
+              updatedMeta = data.metadata;
+              return { ...mockTicket, metadata: updatedMeta };
+            },
+          };
+        }
+        if (key === "documents") {
+          return {
+            deleteDocumentsForRepairTicket: async (id: string) => {
+              deletedTicketId = id;
+            },
+          };
+        }
+        if (key === "logger") {
+          return { info: () => {}, warn: () => {}, error: () => {} };
+        }
+        return null;
+      },
+    },
+  };
+
+  await deleteHandler(mockReq, mockRes);
+
+  assert.strictEqual(deletedTicketId, "rep_ticket_del_test", "Must delegate to deleteDocumentsForRepairTicket");
+  assert.ok(updatedMeta, "Must update ticket metadata");
+  assert.strictEqual(updatedMeta.zoho_invoice_id, undefined, "zoho_invoice_id must be cleared");
+  assert.strictEqual(updatedMeta.zoho_payment_id, undefined, "zoho_payment_id must be cleared");
+  assert.strictEqual(updatedMeta.zoho_estimate_id, undefined, "zoho_estimate_id must be cleared");
+  assert.strictEqual(updatedMeta.pdf_url, undefined, "pdf_url must be cleared");
+  assert.strictEqual(jsonResponse?.success, true);
+});

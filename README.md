@@ -12,9 +12,7 @@ A complete Repair Management System for Medusa, ideal for device repair shops. F
 - **Inventory Integration:** Add both standard Medusa product variants (reserves inventory) and custom ad-hoc parts. Completed tickets auto-deduct standard inventory.
 - **Granular Settings Tab:** Toggle Email, SMS, and WhatsApp notifications directly from the plugin's Admin UI settings tab.
 - **Embedded Templates:** Beautiful, responsive email templates are bundled directly inside the plugin—no global workspace configuration required.
-- **Unified Timeline:** A single timeline view tracking internal notes, customer chat, and automated notifications.
-- **Dynamic Invoicing & Zoho Books Sync:** Built-in PDF generation utilizing `pdfkit` OR seamless external synchronization with **Zoho Books**. Automatically pushes Contacts, Estimates, and Invoices to Zoho Books and streams official Zoho PDFs directly to your customers.
-- **Payment Link Decoupling:** Secure integration with Medusa's `PaymentCollection` for standalone repair payments without forcing draft orders.
+- **Centralized Documents & Zoho Books Sync:** All document generation (Invoices, Quotes, Receipts, Job Cards, Service Reports, and Handovers) is pushed to `medusajs-documents-plugin` with Zoho Books integration. All local PDFKit document generation and fallbacks have been removed from this plugin.
 
 ### 🏪 Frontend / Storefront Features
 - **Storefront Dashboard:** A dedicated `/repairs/dashboard` page where logged-in customers can review historical and active repairs.
