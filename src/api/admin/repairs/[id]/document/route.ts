@@ -114,6 +114,8 @@ export async function DELETE(
   delete updatedMetadata.zoho_payment_id;
   delete updatedMetadata.pdf_url;
   delete updatedMetadata.last_document_generated;
+  delete updatedMetadata.job_card_id;
+  delete updatedMetadata.job_card_created;
 
   const updatedTicket = await repairService.updateRepairTickets({
     id,

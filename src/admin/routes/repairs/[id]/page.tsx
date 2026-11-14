@@ -396,15 +396,35 @@ const RepairDetailPage = () => {
     }
     try {
       setIsResettingDocs(true);
-      const res = await fetch(`/admin/repairs/${id}/document`, {
+
+      // Step 1: Delete all existing documents
+      const delRes = await fetch(`/admin/repairs/${id}/document`, {
         method: "DELETE",
         credentials: "include",
       });
-      const data = await res.json();
-      if (!res.ok) {
-        throw new Error(data.message || "Failed to reset documents");
+      const delData = await delRes.json();
+      if (!delRes.ok) {
+        throw new Error(delData.message || "Failed to reset documents");
       }
-      toast.success(data.message || "Documents reset successfully");
+
+      // Step 2: Regenerate documents sequentially to prevent race conditions in Zoho
+      const isPaid = ticket?.payment_status === "captured" || ticket?.payment_status === "paid" || (Array.isArray(ticket?.metadata?.tags) && ticket?.metadata?.tags.includes("Paid"));
+      const docTypes = ["job_card", "quote", "invoice"];
+      if (isPaid) {
+        docTypes.push("receipt");
+      }
+
+      for (const type of docTypes) {
+        try {
+          await fetch(`/admin/repairs/${id}/document?type=${type}`, {
+            credentials: "include",
+          });
+        } catch (e) {
+          console.warn(`Failed to regenerate ${type}:`, e);
+        }
+      }
+
+      toast.success("Documents reset and regenerated successfully");
       await loadTicket();
     } catch (err: any) {
       toast.error(err.message || "Failed to reset documents");
@@ -582,29 +602,25 @@ const RepairDetailPage = () => {
             )}
           </div>
           <div className="flex flex-wrap items-center justify-end gap-x-5 gap-y-2">
-            <a href={`/admin/repairs/${id}/document?type=job_card`} target="_blank" className="text-[11px] uppercase tracking-wider font-semibold text-ui-fg-subtle hover:text-ui-fg-base transition-colors">
-              Job Card
-            </a>
-            <a href={`/admin/repairs/${id}/document?type=service_report`} target="_blank" className="text-[11px] uppercase tracking-wider font-semibold text-ui-fg-subtle hover:text-ui-fg-base transition-colors">
-              Service Report
-            </a>
-            <a href={`/admin/repairs/${id}/document?type=handover`} target="_blank" className="text-[11px] uppercase tracking-wider font-semibold text-ui-fg-subtle hover:text-ui-fg-base transition-colors">
-              Handover
-            </a>
-            <a href={`/admin/repairs/${id}/document?type=quote`} target="_blank" className="text-[11px] uppercase tracking-wider font-semibold text-ui-fg-subtle hover:text-ui-fg-base transition-colors">
-              Quote
-            </a>
-            <a href={`/admin/repairs/${id}/document?type=invoice`} target="_blank" className="text-[11px] uppercase tracking-wider font-semibold text-ui-fg-subtle hover:text-ui-fg-base transition-colors">
-              Invoice
-            </a>
-            {ticket.payment_status === "captured" || ticket.payment_status === "paid" || ticket.status === "completed" ? (
+            {(ticket?.available_documents?.includes("job_card") || Boolean(ticket?.metadata?.job_card_id || ticket?.metadata?.job_card_created || (ticket?.metadata?.last_document_generated === "job_card" && ticket?.metadata?.pdf_url))) && (
+              <a href={`/admin/repairs/${id}/document?type=job_card`} target="_blank" className="text-[11px] uppercase tracking-wider font-semibold text-ui-fg-subtle hover:text-ui-fg-base transition-colors">
+                Job Card
+              </a>
+            )}
+            {(ticket?.available_documents?.includes("quote") || ticket?.available_documents?.includes("estimate") || Boolean(ticket?.metadata?.zoho_estimate_id)) && (
+              <a href={`/admin/repairs/${id}/document?type=quote`} target="_blank" className="text-[11px] uppercase tracking-wider font-semibold text-ui-fg-subtle hover:text-ui-fg-base transition-colors">
+                Quote
+              </a>
+            )}
+            {(ticket?.available_documents?.includes("invoice") || Boolean(ticket?.metadata?.zoho_invoice_id)) && (
+              <a href={`/admin/repairs/${id}/document?type=invoice`} target="_blank" className="text-[11px] uppercase tracking-wider font-semibold text-ui-fg-subtle hover:text-ui-fg-base transition-colors">
+                Invoice
+              </a>
+            )}
+            {(ticket?.available_documents?.includes("receipt") || Boolean(ticket?.metadata?.zoho_payment_id) || Boolean((ticket?.payment_status === "captured" || ticket?.payment_status === "paid") && ticket?.metadata?.zoho_invoice_id)) && (
               <a href={`/admin/repairs/${id}/document?type=receipt`} target="_blank" className="text-[11px] uppercase tracking-wider font-semibold text-ui-fg-subtle hover:text-ui-fg-base transition-colors">
                 Receipt
               </a>
-            ) : (
-              <span className="text-[11px] uppercase tracking-wider font-semibold text-ui-fg-muted cursor-not-allowed opacity-50" title="Available once payment is captured">
-                Receipt
-              </span>
             )}
             <button
               onClick={handleResetDocuments}

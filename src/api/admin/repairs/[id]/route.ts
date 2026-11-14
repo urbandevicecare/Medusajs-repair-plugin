@@ -66,12 +66,24 @@ export async function GET(
     }
   }
 
+  let availableDocuments: string[] = [];
+  try {
+    const docService: any = req.scope.resolve("documents", { allowUnregistered: true });
+    if (docService && typeof docService.listDocumentRecords === "function") {
+      const records = await docService.listDocumentRecords({ repair_ticket_id: req.params.id }).catch(() => []);
+      if (Array.isArray(records)) {
+        availableDocuments = records.map((r: any) => r.type === "estimate" ? "quote" : r.type);
+      }
+    }
+  } catch (_) {}
+
   res.json({
     repair_ticket: {
       ...data[0],
       customer: customerInfo,
       customer_phone: customerInfo?.phone || "",
       parts,
+      available_documents: availableDocuments,
     },
   });
 }

@@ -126,6 +126,42 @@ export async function generateRepairDocument(
       auto_send: false,
     }, req.scope);
 
+    if (genRes?.record) {
+      try {
+        const repairService: any = req.scope.resolve("repair", { allowUnregistered: true });
+        if (repairService) {
+          const currentMeta = (ticket.metadata as any) || {};
+          const metaUpdate: any = {
+            ...currentMeta,
+            last_document_generated: cleanType,
+            pdf_url: genRes.record.pdf_url || currentMeta.pdf_url,
+          };
+          if (cleanType === "quote" || cleanType === "estimate") {
+            if (genRes.record.zoho_document_id) {
+              metaUpdate.zoho_estimate_id = genRes.record.zoho_document_id;
+            }
+          } else if (cleanType === "invoice") {
+            if (genRes.record.zoho_document_id) {
+              metaUpdate.zoho_invoice_id = genRes.record.zoho_document_id;
+            }
+          } else if (cleanType === "receipt") {
+            if (genRes.record.zoho_document_id) {
+              metaUpdate.zoho_payment_id = genRes.record.zoho_document_id;
+            }
+          } else if (cleanType === "job_card") {
+            metaUpdate.job_card_id = genRes.record.id;
+            metaUpdate.job_card_created = true;
+          }
+          await repairService.updateRepairTickets({
+            id: ticket.id,
+            metadata: metaUpdate,
+          });
+        }
+      } catch (metaErr: any) {
+        logger?.warn?.(`[generateRepairDocument] Failed to update ticket metadata: ${metaErr.message}`);
+      }
+    }
+
     if (genRes?.pdfBuffer) {
       res.setHeader("Content-Type", "application/pdf");
       res.setHeader("Content-Disposition", `inline; filename="${cleanType}-${ticket.ticket_number}.pdf"`);
