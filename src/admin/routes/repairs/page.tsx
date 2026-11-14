@@ -15,7 +15,7 @@ import {
   Tabs,
   Switch,
 } from "@medusajs/ui";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef, useCallback } from "react";
 import { Wrench, DocumentText, ArrowPath, ArrowDownTray, Envelope, Sparkles } from "@medusajs/icons";
 import { useStoreCurrency } from "../../lib/use-store-currency";
 import { useNavigate } from "react-router-dom";
@@ -37,9 +37,17 @@ const RepairsPage = () => {
   const navigate = useNavigate();
   const [tickets, setTickets] = useState<RepairTicket[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [hasMore, setHasMore] = useState(true);
+  const [totalCount, setTotalCount] = useState<number | null>(null);
   const [searchTerm, setSearchTerm] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
   const { formatCurrency } = useStoreCurrency();
+
+  const observerTarget = useRef<HTMLDivElement>(null);
+  const loadingMoreRef = useRef(false);
+  const ticketsRef = useRef<RepairTicket[]>([]);
+  ticketsRef.current = tickets;
 
   const [createModalOpen, setCreateModalOpen] = useState(false);
   const [isCreating, setIsCreating] = useState(false);
@@ -156,27 +164,97 @@ const RepairsPage = () => {
       });
   };
 
-  const loadTickets = () => {
-    setLoading(true);
-    fetch(`/admin/repairs`, {
-      credentials: "include",
-    })
-      .then((res) => res.json())
-      .then((data) => {
-        setTickets(data.repair_tickets || []);
+  const PAGE_SIZE = 100;
+
+  const loadTickets = async (reset: boolean = false, filterToUse: string = statusFilter) => {
+    if (reset) {
+      setLoading(true);
+      setHasMore(true);
+    } else {
+      if (loadingMoreRef.current || !hasMore) return;
+      loadingMoreRef.current = true;
+      setLoadingMore(true);
+    }
+
+    try {
+      const offset = reset ? 0 : ticketsRef.current.length;
+      let url = `/admin/repairs?limit=${PAGE_SIZE}&offset=${offset}`;
+      if (filterToUse && filterToUse !== "all") {
+        url += `&status=${encodeURIComponent(filterToUse)}`;
+      }
+
+      const res = await fetch(url, { credentials: "include" });
+      const data = await res.json();
+      const newItems: RepairTicket[] = data.repair_tickets || [];
+
+      if (typeof data.count === "number") {
+        setTotalCount(data.count);
+      }
+
+      if (reset) {
+        setTickets(newItems);
+        const canLoadMore =
+          newItems.length === PAGE_SIZE &&
+          (typeof data.count !== "number" || newItems.length < data.count);
+        setHasMore(canLoadMore);
+      } else {
+        setTickets((prev) => {
+          const existingIds = new Set(prev.map((t) => t.id));
+          const filteredNew = newItems.filter((t) => !existingIds.has(t.id));
+          const updated = [...prev, ...filteredNew];
+          const canLoadMore =
+            newItems.length === PAGE_SIZE &&
+            (typeof data.count !== "number" || updated.length < data.count);
+          setHasMore(canLoadMore);
+          return updated;
+        });
+      }
+    } catch (err) {
+      console.error("Failed to load repair tickets:", err);
+    } finally {
+      if (reset) {
         setLoading(false);
-      })
-      .catch((err) => {
-        console.error("Failed to load repair tickets:", err);
-        setLoading(false);
-      });
+      } else {
+        setLoadingMore(false);
+        loadingMoreRef.current = false;
+      }
+    }
+  };
+
+  const handleStatusFilterChange = (val: string) => {
+    setStatusFilter(val);
+    loadTickets(true, val);
   };
 
   useEffect(() => {
-    loadTickets();
+    loadTickets(true, "all");
     loadCustomers();
     loadSettings();
   }, []);
+
+  useEffect(() => {
+    if (!hasMore || loading || loadingMore) return;
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0].isIntersecting && hasMore && !loading && !loadingMoreRef.current) {
+          loadTickets(false, statusFilter);
+        }
+      },
+      { threshold: 0.1, rootMargin: "300px" }
+    );
+
+    const target = observerTarget.current;
+    if (target) {
+      observer.observe(target);
+    }
+
+    return () => {
+      if (target) {
+        observer.unobserve(target);
+      }
+    };
+  }, [hasMore, loading, loadingMore, statusFilter, tickets.length]);
 
   const handleAccessoryKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === "," || e.key === "Enter") {
@@ -245,7 +323,7 @@ const RepairsPage = () => {
       });
       setAccessories([]);
       setAccessoryInput("");
-      loadTickets();
+      loadTickets(true, statusFilter);
     } catch (err) {
       console.error(err);
       alert("Error: " + (err instanceof Error ? err.message : String(err)));
@@ -346,7 +424,14 @@ const RepairsPage = () => {
       {activeTab === "tickets" && (
         <div className="p-6">
       <div className="flex items-center justify-between mb-6">
-        <Heading level="h1">Repair Tickets</Heading>
+        <div className="flex items-center gap-3">
+          <Heading level="h1">Repair Tickets</Heading>
+          {totalCount !== null && (
+            <Badge color="grey" size="small">
+              {tickets.length} of {totalCount}
+            </Badge>
+          )}
+        </div>
         <FocusModal open={createModalOpen} onOpenChange={setCreateModalOpen}>
           <FocusModal.Trigger asChild>
             <Button variant="primary">Create Repair Ticket</Button>
@@ -573,7 +658,7 @@ const RepairsPage = () => {
 
       <div className="flex gap-4 mb-6">
         <div className="w-48">
-          <Select value={statusFilter} onValueChange={setStatusFilter}>
+          <Select value={statusFilter} onValueChange={handleStatusFilterChange}>
             <Select.Trigger>
               <Select.Value placeholder="Filter by status" />
             </Select.Trigger>
@@ -682,6 +767,20 @@ const RepairsPage = () => {
             })}
           </Table.Body>
         </Table>
+      )}
+
+      {/* Infinite Scroll Sentinel & Loading Indicator */}
+      <div ref={observerTarget} className="h-6 w-full" />
+      {loadingMore && (
+        <div className="flex items-center justify-center py-4 text-ui-fg-subtle text-xs gap-2">
+          <ArrowPath className="w-4 h-4 animate-spin" />
+          <span>Loading more repair tickets...</span>
+        </div>
+      )}
+      {!hasMore && tickets.length > 0 && !loading && (
+        <div className="text-center py-4 text-ui-fg-muted text-xs">
+          All {tickets.length} {totalCount !== null && totalCount !== tickets.length ? `of ${totalCount}` : ""} repairs loaded
+        </div>
       )}
       </div>
       )}

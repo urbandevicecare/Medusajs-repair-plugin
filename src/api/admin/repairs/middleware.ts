@@ -8,6 +8,7 @@ import { createFindParams } from "@medusajs/medusa/api/utils/validators";
 
 const GetRepairsSchema = createFindParams().extend({
   customer_id: z.union([z.string(), z.array(z.string())]).optional(),
+  status: z.string().optional(),
 });
 
 const CreateRepairTicketSchema = z.object({
