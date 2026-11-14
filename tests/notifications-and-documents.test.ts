@@ -753,3 +753,134 @@ test("Requirement: DELETE /admin/repairs/:id/document delegates to documents mod
   assert.strictEqual(updatedMeta.pdf_url, undefined, "pdf_url must be cleared");
   assert.strictEqual(jsonResponse?.success, true);
 });
+
+test("Requirement: generateRepairDocument strictly blocks receipt generation for unpaid tickets", async () => {
+  const { generateRepairDocument } = await import("../src/utils/generate-repair-document.js");
+
+  let statusCode: number | null = null;
+  let jsonResponse: any = null;
+  const mockRes: any = {
+    setHeader: () => {},
+    status: (code: number) => {
+      statusCode = code;
+      return mockRes;
+    },
+    json: (data: any) => {
+      jsonResponse = data;
+      return mockRes;
+    },
+    send: () => {},
+  };
+
+  const mockTicket = {
+    id: "rep_ticket_unpaid_01",
+    ticket_number: "RT-1001",
+    status: "collected",
+    payment_status: "captured", // Even if erroneously captured, amount_paid is 0
+    amount_paid: 0,
+    total_estimate: 3000,
+    metadata: {},
+  };
+
+  const mockReq: any = {
+    scope: {
+      resolve: (key: string) => {
+        if (key === "repair") return { listRepairSettings: async () => [{}] };
+        if (key === "logger") return { info: () => {}, warn: () => {}, error: () => {} };
+        if (key === "documents") return { generateDocument: async () => ({}) };
+        return null;
+      },
+    },
+  };
+
+  await generateRepairDocument("receipt", mockTicket, "Customer", mockRes, mockReq);
+  assert.strictEqual(statusCode, 400, "Must return 400 Bad Request for unpaid ticket receipt");
+  assert.strictEqual(jsonResponse?.error, "ticket_unpaid");
+});
+
+test("Requirement: POST /admin/repairs/:id/milestone toggles completed without altering payment_status", async () => {
+  const { POST } = await import("../src/api/admin/repairs/[id]/milestone/route.js");
+
+  let updatedPayload: any = null;
+  const mockRepair = {
+    listRepairTickets: async () => [{
+      id: "rep_mile_01",
+      ticket_number: "RT-2001",
+      status: "repairing",
+      payment_status: "pending",
+      amount_paid: 0,
+      metadata: { tags: [] },
+    }],
+    updateRepairTickets: async (payload: any) => {
+      updatedPayload = payload;
+      return payload;
+    },
+  };
+
+  let jsonResponse: any = null;
+  const mockRes: any = {
+    status: () => mockRes,
+    json: (d: any) => { jsonResponse = d; return mockRes; },
+  };
+
+  const mockReq: any = {
+    params: { id: "rep_mile_01" },
+    body: { milestone: "completed", value: true },
+    scope: {
+      resolve: (key: string) => {
+        if (key === "repair") return mockRepair;
+        return null;
+      },
+    },
+  };
+
+  await POST(mockReq, mockRes);
+  assert.strictEqual(jsonResponse?.success, true);
+  assert.ok(updatedPayload.completed_at instanceof Date, "completed_at must be a Date");
+  assert.strictEqual(updatedPayload.payment_status, undefined, "payment_status must NOT be altered by completed milestone");
+  assert.ok(updatedPayload.metadata.tags.includes("Completed"), "Tags must include Completed");
+});
+
+test("Requirement: POST /admin/repairs/:id/milestone handles refund correctly", async () => {
+  const { POST } = await import("../src/api/admin/repairs/[id]/milestone/route.js");
+
+  let updatedPayload: any = null;
+  const mockRepair = {
+    listRepairTickets: async () => [{
+      id: "rep_refund_01",
+      ticket_number: "RT-2002",
+      status: "ready",
+      payment_status: "captured",
+      amount_paid: 5000,
+      metadata: { tags: ["Paid"] },
+    }],
+    updateRepairTickets: async (payload: any) => {
+      updatedPayload = payload;
+      return payload;
+    },
+  };
+
+  let jsonResponse: any = null;
+  const mockRes: any = {
+    status: () => mockRes,
+    json: (d: any) => { jsonResponse = d; return mockRes; },
+  };
+
+  const mockReq: any = {
+    params: { id: "rep_refund_01" },
+    body: { milestone: "refund", amount: 2000, reason: "Parts discount" },
+    scope: {
+      resolve: (key: string) => {
+        if (key === "repair") return mockRepair;
+        return null;
+      },
+    },
+  };
+
+  await POST(mockReq, mockRes);
+  assert.strictEqual(jsonResponse?.success, true);
+  assert.strictEqual(updatedPayload.amount_paid, 3000, "Remaining amount_paid must be 3000");
+  assert.strictEqual(updatedPayload.payment_status, "partially_paid", "Partial refund results in partially_paid");
+  assert.ok(updatedPayload.metadata.tags.includes("Partially Refunded"));
+});
+

@@ -72,7 +72,10 @@ export async function GET(
     if (docService && typeof docService.listDocumentRecords === "function") {
       const records = await docService.listDocumentRecords({ repair_ticket_id: req.params.id }).catch(() => []);
       if (Array.isArray(records)) {
-        availableDocuments = records.map((r: any) => r.type === "estimate" ? "quote" : r.type);
+        const isTicketPaid = Number(data[0]?.amount_paid || 0) > 0 && (data[0]?.payment_status === "captured" || data[0]?.payment_status === "paid");
+        availableDocuments = records
+          .filter((r: any) => isTicketPaid || r.type !== "receipt")
+          .map((r: any) => r.type === "estimate" ? "quote" : r.type);
       }
     }
   } catch (_) {}

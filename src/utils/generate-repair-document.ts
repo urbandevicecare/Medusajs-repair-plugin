@@ -50,6 +50,15 @@ export async function generateRepairDocument(
   const cleanType = (docType || "job_card").toLowerCase().trim();
   const typeFilter = cleanType === "quote" ? "estimate" : cleanType;
 
+  const amountPaidNum = Number(ticket.amount_paid || 0);
+  const isPaid = (ticket.payment_status === "paid" || ticket.payment_status === "captured") && amountPaidNum > 0;
+  if (cleanType === "receipt" && (!isPaid || amountPaidNum <= 0)) {
+    return res.status(400).json({
+      message: `Cannot generate receipt for unpaid repair ticket #${ticket.ticket_number}.`,
+      error: "ticket_unpaid",
+    });
+  }
+
   const docService: any = req.scope.resolve("documents", { allowUnregistered: true });
   if (!docService) {
     logger?.error?.("[generateRepairDocument] Documents module is not registered. Document generation requires medusajs-documents-plugin.");
@@ -94,11 +103,6 @@ export async function generateRepairDocument(
         ? `EST-${cleanTicketNumber}`
         : `RT-${cleanTicketNumber}`;
 
-    const amountPaidNum = Number(ticket.amount_paid || 0);
-    const isPaid = ticket.payment_status === "paid" || ticket.payment_status === "captured" || amountPaidNum > 0;
-    if (cleanType === "receipt" && !isPaid && amountPaidNum <= 0) {
-      throw new Error(`Cannot generate receipt for unpaid repair ticket #${ticket.ticket_number}.`);
-    }
     const payRef = (ticket.metadata as any)?.paystack_reference || (ticket.metadata as any)?.payment_reference;
 
     const genRes = await docService.generateDocument({

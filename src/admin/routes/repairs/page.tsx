@@ -147,6 +147,28 @@ const RepairsPage = () => {
 
   const [customers, setCustomers] = useState<any[]>([]);
   const [loadingCustomers, setLoadingCustomers] = useState(false);
+  const [selectedCustomer, setSelectedCustomer] = useState<any>(null);
+  const [customerSearchQuery, setCustomerSearchQuery] = useState("");
+  const [showCustomerDropdown, setShowCustomerDropdown] = useState(false);
+
+  const filteredCustomers = useMemo(() => {
+    if (!customerSearchQuery.trim()) return customers.slice(0, 30);
+    const q = customerSearchQuery.toLowerCase().trim();
+    return customers
+      .filter((c) => {
+        const fullName = `${c.first_name || ""} ${c.last_name || ""}`.toLowerCase();
+        const email = (c.email || "").toLowerCase();
+        const phone = (c.phone || "").toLowerCase();
+        const company = ((c.company_name || c.metadata?.company_name) || "").toLowerCase();
+        return (
+          fullName.includes(q) ||
+          email.includes(q) ||
+          phone.includes(q) ||
+          company.includes(q)
+        );
+      })
+      .slice(0, 30);
+  }, [customers, customerSearchQuery]);
 
   const loadCustomers = () => {
     setLoadingCustomers(true);
@@ -323,6 +345,9 @@ const RepairsPage = () => {
       });
       setAccessories([]);
       setAccessoryInput("");
+      setSelectedCustomer(null);
+      setCustomerSearchQuery("");
+      setShowCustomerDropdown(false);
       loadTickets(true, statusFilter);
     } catch (err) {
       console.error(err);
@@ -464,17 +489,49 @@ const RepairsPage = () => {
                       <Label htmlFor="brand">Brand *</Label>
                       <Input
                         id="brand"
+                        list="brand-suggestions"
                         value={newDevice.brand}
                         onChange={(e) =>
                           setNewDevice({ ...newDevice, brand: e.target.value })
                         }
                         placeholder="Apple"
                       />
+                      <datalist id="brand-suggestions">
+                        <option value="Apple" />
+                        <option value="Samsung" />
+                        <option value="HP" />
+                        <option value="Dell" />
+                        <option value="Lenovo" />
+                        <option value="Asus" />
+                        <option value="Acer" />
+                        <option value="Microsoft" />
+                        <option value="Google" />
+                        <option value="Sony" />
+                        <option value="Xiaomi" />
+                        <option value="OnePlus" />
+                      </datalist>
+                      <div className="flex flex-wrap gap-1 mt-1">
+                        {["Apple", "Samsung", "HP", "Dell", "Lenovo", "Asus"].map((b) => (
+                          <button
+                            key={b}
+                            type="button"
+                            onClick={() => setNewDevice({ ...newDevice, brand: b })}
+                            className={`text-[10px] px-2 py-0.5 rounded-full border transition-colors ${
+                              newDevice.brand === b
+                                ? "bg-ui-bg-interactive text-ui-fg-on-inverted border-transparent font-medium"
+                                : "bg-ui-bg-subtle text-ui-fg-muted border-ui-border-base hover:text-ui-fg-base"
+                            }`}
+                          >
+                            {b}
+                          </button>
+                        ))}
+                      </div>
                     </div>
                     <div className="flex flex-col gap-y-2">
                       <Label htmlFor="model_name">Model Name *</Label>
                       <Input
                         id="model_name"
+                        list="model-suggestions"
                         value={newDevice.model_name}
                         onChange={(e) =>
                           setNewDevice({
@@ -482,8 +539,47 @@ const RepairsPage = () => {
                             model_name: e.target.value,
                           })
                         }
-                        placeholder="iPhone 13 Pro"
+                        placeholder="iPhone 15 Pro Max"
                       />
+                      <datalist id="model-suggestions">
+                        <option value='MacBook Pro 14"' />
+                        <option value='MacBook Pro 16"' />
+                        <option value="MacBook Air M2" />
+                        <option value="MacBook Air M3" />
+                        <option value="iPhone 15 Pro Max" />
+                        <option value="iPhone 15 Pro" />
+                        <option value="iPhone 15" />
+                        <option value="iPhone 14 Pro Max" />
+                        <option value="iPhone 14" />
+                        <option value="iPhone 13" />
+                        <option value="Galaxy S24 Ultra" />
+                        <option value="Galaxy S23 Ultra" />
+                        <option value="HP EliteBook 840" />
+                        <option value="Dell XPS 15" />
+                        <option value="ThinkPad X1 Carbon" />
+                        <option value="Surface Pro 9" />
+                      </datalist>
+                      <div className="flex flex-wrap gap-1 mt-1">
+                        {(newDevice.brand === "Apple"
+                          ? ["MacBook Pro 14\"", "MacBook Air M2", "iPhone 15 Pro", "iPhone 14", "iPad Pro"]
+                          : newDevice.brand === "Samsung"
+                          ? ["Galaxy S24 Ultra", "Galaxy S23", "Galaxy Z Fold", "Galaxy Tab S9"]
+                          : newDevice.brand === "HP"
+                          ? ["EliteBook 840", "Spectre x360", "Pavilion 15", "Envy x360"]
+                          : newDevice.brand === "Dell"
+                          ? ["XPS 15", "XPS 13", "Latitude 5420", "Inspiron 16"]
+                          : ["MacBook Pro 14\"", "iPhone 15 Pro", "Galaxy S24", "EliteBook 840", "ThinkPad X1"]
+                        ).map((m) => (
+                          <button
+                            key={m}
+                            type="button"
+                            onClick={() => setNewDevice({ ...newDevice, model_name: m })}
+                            className="text-[10px] px-2 py-0.5 rounded-full bg-ui-bg-subtle text-ui-fg-muted border border-ui-border-base hover:text-ui-fg-base transition-colors"
+                          >
+                            {m}
+                          </button>
+                        ))}
+                      </div>
                     </div>
                     <div className="flex flex-col gap-y-2">
                       <Label htmlFor="serial_number">Serial Number *</Label>
@@ -522,8 +618,35 @@ const RepairsPage = () => {
                           })
                         }
                         placeholder="Scratches on screen, etc."
-                        rows={3}
+                        rows={2}
                       />
+                      <div className="flex flex-wrap gap-1 mt-1">
+                        {[
+                          "Pristine / Like New",
+                          "Minor Scratches",
+                          "Heavy Scratches",
+                          "Dented Corners",
+                          "Cracked Back Glass",
+                          "Liquid Residue",
+                          "Previously Worked On",
+                          "Non-booting",
+                        ].map((cond) => (
+                          <button
+                            key={cond}
+                            type="button"
+                            onClick={() => {
+                              const current = newDevice.condition.trim();
+                              setNewDevice({
+                                ...newDevice,
+                                condition: current ? `${current}, ${cond}` : cond,
+                              });
+                            }}
+                            className="text-[10px] px-2 py-0.5 rounded-full bg-ui-bg-subtle text-ui-fg-muted border border-ui-border-base hover:text-ui-fg-base transition-colors"
+                          >
+                            + {cond}
+                          </button>
+                        ))}
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -533,36 +656,78 @@ const RepairsPage = () => {
                     Ticket Details
                   </Heading>
                   <div className="grid grid-cols-1 gap-4">
-                    <div className="flex flex-col gap-y-2">
-                      <Label htmlFor="customer_id">Customer</Label>
-                      <Select
-                        value={newTicket.customer_id}
-                        onValueChange={(val) => {
-                          setNewTicket({ ...newTicket, customer_id: val });
-                          setNewDevice({ ...newDevice, customer_id: val });
-                        }}
-                      >
-                        <Select.Trigger>
-                          <Select.Value
-                            placeholder={
-                              loadingCustomers
-                                ? "Loading..."
-                                : "Select a customer"
-                            }
-                          />
-                        </Select.Trigger>
-                        <Select.Content>
-                          {customers.map((customer) => (
-                            <Select.Item key={customer.id} value={customer.id}>
-                              {customer.first_name || customer.last_name
-                                ? `${customer.first_name || ""} ${customer.last_name || ""}`.trim()
-                                : "No Name"}{" "}
-                              ({customer.email})
-                            </Select.Item>
-                          ))}
-                        </Select.Content>
-                      </Select>
+                    <div className="flex flex-col gap-y-2 relative">
+                      <div className="flex justify-between items-center">
+                        <Label htmlFor="customer_search">Customer *</Label>
+                        {selectedCustomer && (
+                          <span className="text-xs text-green-700 font-semibold flex items-center gap-1">
+                            ✓ {selectedCustomer.first_name || ""} {selectedCustomer.last_name || ""}
+                          </span>
+                        )}
+                      </div>
+                      <div className="relative">
+                        <Input
+                          id="customer_search"
+                          placeholder="Search customer by name, email, phone or company..."
+                          value={customerSearchQuery}
+                          onChange={(e) => {
+                            setCustomerSearchQuery(e.target.value);
+                            setShowCustomerDropdown(true);
+                          }}
+                          onFocus={() => setShowCustomerDropdown(true)}
+                        />
+                        {selectedCustomer && (
+                          <button
+                            type="button"
+                            className="absolute right-2.5 top-1/2 -translate-y-1/2 text-ui-fg-muted hover:text-ui-fg-base text-sm font-bold p-1"
+                            onClick={() => {
+                              setSelectedCustomer(null);
+                              setCustomerSearchQuery("");
+                              setNewTicket({ ...newTicket, customer_id: "" });
+                              setNewDevice({ ...newDevice, customer_id: "" });
+                            }}
+                          >
+                            ×
+                          </button>
+                        )}
+                      </div>
+                      {showCustomerDropdown && (
+                        <div className="absolute top-full left-0 z-50 w-full mt-1 bg-ui-bg-base border border-ui-border-base rounded-md shadow-lg max-h-60 overflow-y-auto">
+                          {filteredCustomers.length > 0 ? (
+                            filteredCustomers.map((cust) => (
+                              <div
+                                key={cust.id}
+                                className="p-2.5 text-sm cursor-pointer hover:bg-ui-bg-subtle-hover border-b border-ui-border-base last:border-b-0 flex justify-between items-center"
+                                onMouseDown={() => {
+                                  setSelectedCustomer(cust);
+                                  const displayName = `${cust.first_name || ""} ${cust.last_name || ""}`.trim() || cust.email || cust.phone;
+                                  setCustomerSearchQuery(`${displayName} (${cust.email || cust.phone || "No contact"})`);
+                                  setShowCustomerDropdown(false);
+                                  setNewTicket({ ...newTicket, customer_id: cust.id });
+                                  setNewDevice({ ...newDevice, customer_id: cust.id });
+                                }}
+                              >
+                                <div>
+                                  <div className="font-medium text-ui-fg-base">
+                                    {cust.first_name || cust.last_name ? `${cust.first_name || ""} ${cust.last_name || ""}`.trim() : "Unnamed Customer"}
+                                    {cust.company_name && <span className="text-ui-fg-muted font-normal text-xs ml-1.5">• {cust.company_name}</span>}
+                                  </div>
+                                  <div className="text-xs text-ui-fg-muted">
+                                    {cust.email} {cust.phone ? `• ${cust.phone}` : ""}
+                                  </div>
+                                </div>
+                                <span className="text-[11px] font-mono text-ui-fg-subtle">Select</span>
+                              </div>
+                            ))
+                          ) : (
+                            <div className="p-3 text-sm text-ui-fg-muted text-center">
+                              No customer found matching "{customerSearchQuery}"
+                            </div>
+                          )}
+                        </div>
+                      )}
                     </div>
+
                     <div className="flex flex-col gap-y-2">
                       <Label htmlFor="issue_description">
                         Issue Description *
@@ -576,8 +741,36 @@ const RepairsPage = () => {
                             issue_description: e.target.value,
                           })
                         }
-                        placeholder="Screen is cracked and battery draining fast."
+                        placeholder="e.g. Broken screen, water damage, battery replacement"
+                        rows={3}
                       />
+                      <div className="flex flex-wrap gap-1 mt-1">
+                        {[
+                          "Cracked Screen Replacement",
+                          "Battery Replacement / Health Low",
+                          "Liquid Damage / Water Spill",
+                          "Power Issue / Won't Turn On",
+                          "Charging Port Broken",
+                          "Keyboard Malfunction",
+                          "Logic Board Repair",
+                          "Software / OS Reinstall",
+                        ].map((issue) => (
+                          <button
+                            key={issue}
+                            type="button"
+                            onClick={() => {
+                              const current = newTicket.issue_description.trim();
+                              setNewTicket({
+                                ...newTicket,
+                                issue_description: current ? `${current}, ${issue}` : issue,
+                              });
+                            }}
+                            className="text-[10px] px-2 py-0.5 rounded-full bg-ui-bg-subtle text-ui-fg-muted border border-ui-border-base hover:text-ui-fg-base transition-colors"
+                          >
+                            + {issue}
+                          </button>
+                        ))}
+                      </div>
                     </div>
                     <div className="flex flex-col gap-y-2">
                       <Label htmlFor="accessories">
@@ -731,15 +924,35 @@ const RepairsPage = () => {
                   </Text>
                 </Table.Cell>
                 <Table.Cell>
-                  <div className="flex gap-2 items-center">
+                  <div className="flex flex-wrap gap-1.5 items-center">
                     <Badge color={getStatusColor(ticket.status)} size="small">
                       {ticket.status.replace("_", " ")}
                     </Badge>
-                    {(ticket.payment_status === "captured" || ticket.payment_status === "paid" || (Array.isArray(ticket.metadata?.tags) && ticket.metadata?.tags.includes("Paid"))) ? (
+                    {(ticket.completed_at || ticket.status === "completed" || ticket.metadata?.is_completed) && (
+                      <Badge color="green" size="small">
+                        Completed
+                      </Badge>
+                    )}
+                    {(ticket.collected_at || ticket.status === "collected" || ticket.metadata?.is_collected) && (
+                      <Badge color="blue" size="small">
+                        Collected
+                      </Badge>
+                    )}
+                    {(ticket.status === "cancelled" || ticket.metadata?.is_cancelled) && (
+                      <Badge color="red" size="small">
+                        Cancelled
+                      </Badge>
+                    )}
+                    {(ticket.payment_status === "refunded" || ticket.metadata?.is_refunded) && (
+                      <Badge color="orange" size="small">
+                        Refunded
+                      </Badge>
+                    )}
+                    {(Number(ticket.amount_paid || 0) > 0 && (ticket.payment_status === "captured" || ticket.payment_status === "paid")) ? (
                       <Badge color="green" size="small">
                         Paid
                       </Badge>
-                    ) : (ticket.payment_status === "partially_paid" || (Array.isArray(ticket.metadata?.tags) && ticket.metadata?.tags.includes("Partially Paid"))) ? (
+                    ) : (Number(ticket.amount_paid || 0) > 0 || ticket.payment_status === "partially_paid") ? (
                       <Badge color="orange" size="small">
                         Partially Paid
                       </Badge>

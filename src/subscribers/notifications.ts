@@ -191,15 +191,18 @@ export default async function globalNotificationHandler({
       // ---------------------------------------------------------
       // DOCUMENT LINK HANDOVER & RESOLUTION
       // ---------------------------------------------------------
+      const amountPaidNum = Number(ticket.amount_paid || 0);
+      const isPaid = (ticket.payment_status === "captured" || ticket.payment_status === "paid") && amountPaidNum > 0;
+
       let expectedType: string | undefined = undefined;
-      if (eventName === "repair.payment_received") {
+      if (eventName === "repair.payment_received" && (amountPaidNum > 0 || Number((data as any)?.amount || 0) > 0)) {
         expectedType = "receipt";
       } else if (eventName === "repair.created" || rawStatus === "received") {
         expectedType = "job_card";
       } else if (rawStatus === "awaiting_approval") {
         expectedType = "estimate";
       } else if (["repairing", "ready", "completed", "collected", "repaired"].includes(rawStatus)) {
-        expectedType = "invoice";
+        expectedType = isPaid ? "receipt" : "invoice";
       }
 
       let pdfUrl = "";
@@ -208,11 +211,15 @@ export default async function globalNotificationHandler({
       // 1. Handover link from ticket metadata if matching expected document type
       const metaDocType = (ticket.metadata as any)?.last_document_type;
       if (metaDocType && expectedType && metaDocType === expectedType) {
-        pdfUrl = (ticket.metadata as any)?.pdf_url || "";
-        shortPdfUrl = (ticket.metadata as any)?.short_pdf_link || "";
+        if (expectedType !== "receipt" || isPaid) {
+          pdfUrl = (ticket.metadata as any)?.pdf_url || "";
+          shortPdfUrl = (ticket.metadata as any)?.short_pdf_link || "";
+        }
       } else if (!expectedType && (ticket.metadata as any)?.pdf_url) {
-        pdfUrl = (ticket.metadata as any)?.pdf_url || "";
-        shortPdfUrl = (ticket.metadata as any)?.short_pdf_link || "";
+        if (metaDocType !== "receipt" || isPaid) {
+          pdfUrl = (ticket.metadata as any)?.pdf_url || "";
+          shortPdfUrl = (ticket.metadata as any)?.short_pdf_link || "";
+        }
       }
 
       // 2. Query documents module directly if registered in Medusa container
@@ -229,26 +236,33 @@ export default async function globalNotificationHandler({
               docs = await docModule.listDocumentRecords({ repair_ticket_id: ticket.id }).catch(() => []);
             }
             if (docs && docs.length > 0) {
-              docs.sort((a: any, b: any) => new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime());
-              const latestDoc = docs[0];
-              pdfUrl = latestDoc.pdf_url || "";
-              shortPdfUrl = latestDoc.short_pdf_link || latestDoc.pdf_url || "";
+              if (!isPaid) {
+                docs = docs.filter((d: any) => d.type !== "receipt");
+              }
+              if (docs.length > 0) {
+                docs.sort((a: any, b: any) => new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime());
+                const latestDoc = docs[0];
+                pdfUrl = latestDoc.pdf_url || "";
+                shortPdfUrl = latestDoc.short_pdf_link || latestDoc.pdf_url || "";
+              }
             }
           }
         } catch (e) {}
       }
 
-      // 3. Fallback to generic metadata link if still unresolved
+      // 3. Fallback to generic metadata link if still unresolved (only if not an unpaid receipt)
       if (!pdfUrl && (ticket.metadata as any)?.pdf_url) {
-        pdfUrl = (ticket.metadata as any).pdf_url;
-        shortPdfUrl = (ticket.metadata as any).short_pdf_link || pdfUrl;
+        if ((ticket.metadata as any)?.last_document_type !== "receipt" || isPaid) {
+          pdfUrl = (ticket.metadata as any).pdf_url;
+          shortPdfUrl = (ticket.metadata as any).short_pdf_link || pdfUrl;
+        }
       }
 
       // 4. Fallback to repair plugin's native secure token endpoint
       if (!pdfUrl && ticket.approval_token) {
         let docTypeParam = "invoice";
         if (eventName === "repair.created" || rawStatus === "received") docTypeParam = "job_card";
-        else if (eventName === "repair.payment_received") docTypeParam = "receipt";
+        else if (eventName === "repair.payment_received" && isPaid) docTypeParam = "receipt";
         else if (rawStatus === "awaiting_approval") docTypeParam = "quote";
 
         pdfUrl = `${storeUrl}/api/repairs/token/${ticket.approval_token}/document?type=${docTypeParam}`;

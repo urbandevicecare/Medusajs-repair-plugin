@@ -79,18 +79,29 @@ export async function POST(req: MedusaRequest, res: MedusaResponse) {
     });
   }
 
+  const cleanedMetadata = { ...existingMetadata };
+  if (isReset) {
+    delete cleanedMetadata.zoho_payment_id;
+    delete cleanedMetadata.paystack_reference;
+    delete cleanedMetadata.payment_reference;
+    delete cleanedMetadata.receipt_number;
+    delete cleanedMetadata.last_payment_method;
+    delete cleanedMetadata.last_payment_reference;
+    cleanedMetadata.tags = existingTags.filter((t) => t !== "Paid" && t !== "Partially Paid");
+    cleanedMetadata.payment_history = [];
+  } else {
+    cleanedMetadata.tags = existingTags;
+    cleanedMetadata.payment_history = paymentHistory;
+    cleanedMetadata.last_payment_method = method || "Cash";
+    cleanedMetadata.last_payment_reference = reference || "";
+  }
+
   const updates: any = {
     id,
     amount_paid: newAmountPaid,
     payment_status: paymentStatus,
     payment_collection_id: isReset ? null : (reference || ticket.payment_collection_id),
-    metadata: {
-      ...existingMetadata,
-      tags: existingTags,
-      payment_history: isReset ? [] : paymentHistory,
-      last_payment_method: isReset ? null : (method || "Cash"),
-      last_payment_reference: isReset ? null : (reference || ""),
-    },
+    metadata: cleanedMetadata,
   };
 
   // If ticket was awaiting_approval and has been paid/partially paid, can move to repairing
@@ -99,6 +110,17 @@ export async function POST(req: MedusaRequest, res: MedusaResponse) {
   }
 
   const updatedTicket = await repairService.updateRepairTickets(updates);
+
+  if (isReset) {
+    try {
+      const docService: any = req.scope.resolve("documents", { allowUnregistered: true });
+      if (docService && typeof docService.deleteReceiptsForRepairTicket === "function") {
+        await docService.deleteReceiptsForRepairTicket(id, req.scope);
+      }
+    } catch (e) {
+      req.scope.resolve("logger")?.warn?.(`[Mark Paid] Failed to delete receipts on reset: ${e}`);
+    }
+  }
   
   let handledByDocumentsModule = false;
   try {

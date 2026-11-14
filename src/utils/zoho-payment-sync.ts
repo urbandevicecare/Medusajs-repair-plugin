@@ -12,6 +12,14 @@ export async function syncPaymentToZoho(
   const repairService: RepairModuleService = container.resolve(REPAIR_MODULE);
   const ticket = await repairService.retrieveRepairTicket(ticketId);
 
+  const paymentAmount = Number(amount || 0);
+  if (paymentAmount <= 0) {
+    container.resolve("logger")?.warn?.(
+      `[syncPaymentToZoho] Skipping Zoho payment sync for ticket ${ticketId}: payment amount must be greater than zero.`
+    );
+    return;
+  }
+
   // Centralize document & Zoho payment creation in medusajs-documents-plugin
   const docService: any = container.resolve("documents", { allowUnregistered: true });
   if (docService) {
@@ -20,7 +28,8 @@ export async function syncPaymentToZoho(
         {
           type: "receipt",
           repair_ticket_id: ticket.id,
-          total: Number(amount || ticket.total_actual || ticket.total_estimate || 0),
+          total: paymentAmount,
+          amount_paid: paymentAmount,
           payment_reference: referenceNumber || (ticket.metadata as any)?.paystack_reference || (ticket.metadata as any)?.payment_reference,
           payment_status: "paid",
           auto_send: false,

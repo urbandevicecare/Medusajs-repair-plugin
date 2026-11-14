@@ -132,6 +132,10 @@ const RepairDetailPage = () => {
   const [paymentMethod, setPaymentMethod] = useState("Cash");
   const [paymentReference, setPaymentReference] = useState("");
   const [isSubmittingPayment, setIsSubmittingPayment] = useState(false);
+  const [refundModalOpen, setRefundModalOpen] = useState(false);
+  const [refundAmount, setRefundAmount] = useState("");
+  const [refundReason, setRefundReason] = useState("");
+  const [isSubmittingRefund, setIsSubmittingRefund] = useState(false);
 
   useEffect(() => {
     const delayDebounceFn = setTimeout(() => {
@@ -398,6 +402,68 @@ const RepairDetailPage = () => {
     }
   };
 
+  const handleToggleMilestone = async (milestone: "completed" | "collected", value: boolean) => {
+    try {
+      const res = await fetch(`/admin/repairs/${id}/milestone`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ milestone, value }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.message || `Failed to update ${milestone}`);
+      toast.success(value ? `Marked as ${milestone}` : `Unmarked as ${milestone}`);
+      loadTicket();
+    } catch (e: any) {
+      toast.error(e.message);
+    }
+  };
+
+  const handleCancelJob = async () => {
+    const reason = prompt("Enter a reason for cancelling this repair ticket (optional):");
+    if (reason === null) return;
+    try {
+      const res = await fetch(`/admin/repairs/${id}/milestone`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ milestone: "cancelled", reason }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.message || "Failed to cancel ticket");
+      toast.success("Repair ticket cancelled");
+      loadTicket();
+    } catch (e: any) {
+      toast.error(e.message);
+    }
+  };
+
+  const handleRecordRefund = async () => {
+    const amt = parseFloat(refundAmount);
+    if (isNaN(amt) || amt <= 0) {
+      toast.error("Please enter a valid refund amount greater than 0");
+      return;
+    }
+    try {
+      setIsSubmittingRefund(true);
+      const res = await fetch(`/admin/repairs/${id}/milestone`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ milestone: "refund", amount: amt, reason: refundReason }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.message || "Failed to record refund");
+      toast.success("Refund recorded successfully");
+      setRefundModalOpen(false);
+      loadTicket();
+    } catch (e: any) {
+      toast.error(e.message);
+    } finally {
+      setIsSubmittingRefund(false);
+    }
+  };
+
   const handleSendUnified = async () => {
     if (!unifiedMessage.trim()) return;
     try {
@@ -461,7 +527,7 @@ const RepairDetailPage = () => {
       }
 
       // Step 2: Regenerate documents sequentially to prevent race conditions in Zoho
-      const isPaid = ticket?.payment_status === "captured" || ticket?.payment_status === "paid" || (Array.isArray(ticket?.metadata?.tags) && ticket?.metadata?.tags.includes("Paid"));
+      const isPaid = Number(ticket?.amount_paid || 0) > 0 && (ticket?.payment_status === "captured" || ticket?.payment_status === "paid" || (Array.isArray(ticket?.metadata?.tags) && ticket?.metadata?.tags.includes("Paid")));
       const docTypes = ["job_card", "quote", "invoice"];
       if (isPaid) {
         docTypes.push("receipt");
@@ -640,12 +706,26 @@ const RepairDetailPage = () => {
               <Badge color={getStatusColor(ticket.status)}>
                 {ticket.status.replace("_", " ")}
               </Badge>
+              {(ticket.completed_at || ticket.status === "completed" || ticket.metadata?.is_completed) && (
+                <Badge color="green">Completed</Badge>
+              )}
+              {(ticket.collected_at || ticket.status === "collected" || ticket.metadata?.is_collected) && (
+                <Badge color="blue">Collected</Badge>
+              )}
+              {(ticket.status === "cancelled" || ticket.metadata?.is_cancelled) && (
+                <Badge color="red">Cancelled</Badge>
+              )}
+              {(ticket.payment_status === "refunded" || ticket.metadata?.is_refunded) && (
+                <Badge color="orange">
+                  {ticket.metadata?.last_refund_amount ? `Refunded (${formatCurrency(ticket.metadata.last_refund_amount)})` : "Refunded"}
+                </Badge>
+              )}
               {ticket.technician_name && (
                 <Badge color="purple">{ticket.technician_name}</Badge>
               )}
-              {(ticket.payment_status === "captured" || ticket.payment_status === "paid" || (Array.isArray(ticket.metadata?.tags) && ticket.metadata?.tags.includes("Paid"))) ? (
+              {(Number(ticket.amount_paid || 0) > 0 && (ticket.payment_status === "captured" || ticket.payment_status === "paid")) ? (
                 <Badge color="green">Paid</Badge>
-              ) : (ticket.payment_status === "partially_paid" || (Array.isArray(ticket.metadata?.tags) && ticket.metadata?.tags.includes("Partially Paid")) || (ticket.amount_paid || 0) > 0) ? (
+              ) : (Number(ticket.amount_paid || 0) > 0 || ticket.payment_status === "partially_paid") ? (
                 <Badge color="orange">Partially Paid ({formatCurrency(ticket.amount_paid || 0)})</Badge>
               ) : (
                 <Badge color="red">Unpaid</Badge>
@@ -674,7 +754,7 @@ const RepairDetailPage = () => {
                 Invoice
               </a>
             )}
-            {(ticket?.available_documents?.includes("receipt") || Boolean(ticket?.metadata?.zoho_payment_id) || Boolean((ticket?.payment_status === "captured" || ticket?.payment_status === "paid") && ticket?.metadata?.zoho_invoice_id)) && (
+            {(Number(ticket.amount_paid || 0) > 0 && (ticket?.available_documents?.includes("receipt") || Boolean(ticket?.metadata?.zoho_payment_id) || Boolean((ticket?.payment_status === "captured" || ticket?.payment_status === "paid") && ticket?.metadata?.zoho_invoice_id))) && (
               <a href={`/admin/repairs/${id}/document?type=receipt`} target="_blank" className="text-[11px] uppercase tracking-wider font-semibold text-ui-fg-subtle hover:text-ui-fg-base transition-colors">
                 Receipt
               </a>
@@ -803,9 +883,9 @@ const RepairDetailPage = () => {
                 <div className="relative">
                   <div className="flex justify-between items-center mb-1">
                     <span className="text-[10px] uppercase font-semibold text-ui-fg-muted tracking-wider block">Status</span>
-                    {ticket?.payment_status === "captured" || ticket?.payment_status === "paid" || (Array.isArray(ticket?.metadata?.tags) && ticket?.metadata?.tags.includes("Paid")) ? (
+                    {Number(ticket?.amount_paid || 0) > 0 && (ticket?.payment_status === "captured" || ticket?.payment_status === "paid" || (Array.isArray(ticket?.metadata?.tags) && ticket?.metadata?.tags.includes("Paid"))) ? (
                       <span className="text-[9px] font-bold px-1.5 py-0.5 bg-green-100 text-green-700 rounded-sm leading-none">PAID</span>
-                    ) : ticket?.payment_status === "partially_paid" || (Array.isArray(ticket?.metadata?.tags) && ticket?.metadata?.tags.includes("Partially Paid")) || (ticket?.amount_paid || 0) > 0 ? (
+                    ) : (Number(ticket?.amount_paid || 0) > 0 || ticket?.payment_status === "partially_paid" || (Array.isArray(ticket?.metadata?.tags) && ticket?.metadata?.tags.includes("Partially Paid"))) ? (
                       <span className="text-[9px] font-bold px-1.5 py-0.5 bg-orange-100 text-orange-700 rounded-sm leading-none">PARTIAL</span>
                     ) : (
                       <span className="text-[9px] font-bold px-1.5 py-0.5 bg-red-100 text-red-700 rounded-sm leading-none">UNPAID</span>
@@ -827,12 +907,72 @@ const RepairDetailPage = () => {
                       <option value="awaiting_approval">Awaiting Approval</option>
                       <option value="repairing" disabled={!ticket?.is_approved}>Repairing {!ticket?.is_approved && "(Req Approval)"}</option>
                       <option value="ready" disabled={!ticket?.is_approved}>Ready {!ticket?.is_approved && "(Req Approval)"}</option>
-                      <option value="completed" disabled={!ticket?.is_approved}>Completed {!ticket?.is_approved && "(Req Approval)"}</option>
-                      <option value="collected" disabled={!ticket?.is_approved}>Collected {!ticket?.is_approved && "(Req Approval)"}</option>
-                      <option value="cancelled">Cancelled</option>
-                      <option value="refunded">Refunded</option>
+                      {!["pending_dropoff", "received", "diagnosing", "awaiting_approval", "repairing", "ready"].includes(newStatus) && (
+                        <option value={newStatus} disabled>{newStatus.replace("_", " ")} (Milestone)</option>
+                      )}
                     </select>
                   </div>
+                </div>
+              </div>
+
+              {/* Physical Milestone Action Toggles & Buttons */}
+              <div className="pt-3 border-t border-ui-border-base">
+                <span className="text-[10px] uppercase font-semibold text-ui-fg-muted tracking-wider mb-2 block">
+                  Workflow Milestones (Decoupled from Payment)
+                </span>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => handleToggleMilestone("completed", !(ticket?.completed_at || ticket?.metadata?.is_completed))}
+                    className={`flex items-center justify-center gap-1.5 px-2.5 py-1.5 rounded border text-xs font-semibold transition-all ${
+                      (ticket?.completed_at || ticket?.metadata?.is_completed)
+                        ? "bg-green-100 border-green-300 text-green-800 shadow-sm"
+                        : "bg-ui-bg-subtle border-ui-border-base text-ui-fg-muted hover:text-ui-fg-base hover:bg-ui-bg-subtle-hover"
+                    }`}
+                  >
+                    <span>{(ticket?.completed_at || ticket?.metadata?.is_completed) ? "✓ Completed" : "Mark Completed"}</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => handleToggleMilestone("collected", !(ticket?.collected_at || ticket?.metadata?.is_collected))}
+                    className={`flex items-center justify-center gap-1.5 px-2.5 py-1.5 rounded border text-xs font-semibold transition-all ${
+                      (ticket?.collected_at || ticket?.metadata?.is_collected)
+                        ? "bg-blue-100 border-blue-300 text-blue-800 shadow-sm"
+                        : "bg-ui-bg-subtle border-ui-border-base text-ui-fg-muted hover:text-ui-fg-base hover:bg-ui-bg-subtle-hover"
+                    }`}
+                  >
+                    <span>{(ticket?.collected_at || ticket?.metadata?.is_collected) ? "✓ Collected" : "Mark Collected"}</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => handleCancelJob()}
+                    disabled={ticket?.status === "cancelled" || ticket?.metadata?.is_cancelled}
+                    className={`flex items-center justify-center gap-1.5 px-2.5 py-1.5 rounded border text-xs font-semibold transition-all ${
+                      (ticket?.status === "cancelled" || ticket?.metadata?.is_cancelled)
+                        ? "bg-red-100 border-red-300 text-red-800 opacity-80 cursor-not-allowed"
+                        : "bg-ui-bg-subtle border-ui-border-base text-red-600 hover:bg-red-50 hover:border-red-200"
+                    }`}
+                  >
+                    <span>{(ticket?.status === "cancelled" || ticket?.metadata?.is_cancelled) ? "Cancelled" : "Cancel Job"}</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setRefundAmount(ticket?.amount_paid ? String(ticket.amount_paid) : "");
+                      setRefundReason("");
+                      setRefundModalOpen(true);
+                    }}
+                    className={`flex items-center justify-center gap-1.5 px-2.5 py-1.5 rounded border text-xs font-semibold transition-all ${
+                      (ticket?.payment_status === "refunded" || ticket?.metadata?.is_refunded)
+                        ? "bg-orange-100 border-orange-300 text-orange-800 shadow-sm"
+                        : "bg-ui-bg-subtle border-ui-border-base text-ui-fg-muted hover:text-ui-fg-base hover:bg-ui-bg-subtle-hover"
+                    }`}
+                  >
+                    <span>{(ticket?.payment_status === "refunded" || ticket?.metadata?.is_refunded) ? "Refunded" : "Record Refund"}</span>
+                  </button>
                 </div>
               </div>
 
@@ -1122,9 +1262,9 @@ const RepairDetailPage = () => {
                     <button 
                       onClick={openPaymentModal}
                       disabled={loading}
-                      className={`py-1.5 text-[11px] uppercase tracking-wider font-semibold text-ui-fg-base bg-ui-bg-subtle hover:bg-ui-bg-subtle-hover rounded-md transition-colors disabled:opacity-50 ${ticket.payment_status === "paid" || ticket.payment_status === "captured" ? "col-span-2" : ""}`}
+                      className={`py-1.5 text-[11px] uppercase tracking-wider font-semibold text-ui-fg-base bg-ui-bg-subtle hover:bg-ui-bg-subtle-hover rounded-md transition-colors disabled:opacity-50 ${(Number(ticket.amount_paid || 0) > 0 && (ticket.payment_status === "paid" || ticket.payment_status === "captured")) ? "col-span-2" : ""}`}
                     >
-                      {ticket.payment_status === "paid" || ticket.payment_status === "captured"
+                      {Number(ticket.amount_paid || 0) > 0 && (ticket.payment_status === "paid" || ticket.payment_status === "captured")
                         ? "Manage / Reset Payment"
                         : (ticket.amount_paid || 0) > 0
                         ? "Record Payment / Add Cash"
@@ -1142,8 +1282,8 @@ const RepairDetailPage = () => {
                       <span className="text-[9px] uppercase font-bold text-ui-fg-muted tracking-wider">
                         APPR: {new Date(ticket.approved_at!).toLocaleDateString()}
                       </span>
-                      <span className={`text-[9px] uppercase font-bold px-1.5 py-0.5 rounded-sm leading-none tracking-wider ${ticket.payment_status === "paid" || ticket.payment_status === "captured" ? 'bg-green-100 text-green-700' : ticket.payment_status === 'partially_paid' || (ticket.amount_paid || 0) > 0 ? 'bg-orange-100 text-orange-700' : 'bg-red-100 text-red-700'}`}>
-                        {ticket.payment_status === "captured" || ticket.payment_status === "paid" ? "PAID" : ticket.payment_status === "partially_paid" || (ticket.amount_paid || 0) > 0 ? "PARTIAL" : "UNPAID"}
+                      <span className={`text-[9px] uppercase font-bold px-1.5 py-0.5 rounded-sm leading-none tracking-wider ${Number(ticket.amount_paid || 0) > 0 && (ticket.payment_status === "paid" || ticket.payment_status === "captured") ? 'bg-green-100 text-green-700' : ticket.payment_status === 'partially_paid' || (ticket.amount_paid || 0) > 0 ? 'bg-orange-100 text-orange-700' : 'bg-red-100 text-red-700'}`}>
+                        {Number(ticket.amount_paid || 0) > 0 && (ticket.payment_status === "captured" || ticket.payment_status === "paid") ? "PAID" : ticket.payment_status === "partially_paid" || (ticket.amount_paid || 0) > 0 ? "PARTIAL" : "UNPAID"}
                       </span>
                     </div>
                   </div>
@@ -1457,6 +1597,70 @@ const RepairDetailPage = () => {
                     Record Payment
                   </Button>
                 </div>
+              </div>
+            </div>
+          </FocusModal.Body>
+        </FocusModal.Content>
+      </FocusModal>
+
+      {/* Refund Modal */}
+      <FocusModal open={refundModalOpen} onOpenChange={setRefundModalOpen}>
+        <FocusModal.Content>
+          <FocusModal.Header>
+            <Heading level="h2">Record Refund</Heading>
+          </FocusModal.Header>
+          <FocusModal.Body className="p-6 max-w-lg mx-auto w-full">
+            <div className="space-y-4">
+              <div className="p-4 bg-ui-bg-subtle rounded-lg border border-ui-border-base flex justify-between">
+                <div>
+                  <Text className="text-xs text-ui-fg-muted uppercase font-semibold">Total Ticket</Text>
+                  <Text className="text-base font-bold text-ui-fg-base">{formatCurrency(ticket.total_actual > 0 ? ticket.total_actual : ticket.total_estimate)}</Text>
+                </div>
+                <div>
+                  <Text className="text-xs text-ui-fg-muted uppercase font-semibold">Currently Paid</Text>
+                  <Text className="text-base font-medium text-green-600">{formatCurrency(ticket.amount_paid || 0)}</Text>
+                </div>
+              </div>
+
+              <div>
+                <Label htmlFor="refund-amount">Refund Amount (KES)</Label>
+                <Input
+                  id="refund-amount"
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  placeholder="Enter refund amount"
+                  value={refundAmount}
+                  onChange={(e) => setRefundAmount(e.target.value)}
+                />
+              </div>
+
+              <div>
+                <Label htmlFor="refund-reason">Refund Reason</Label>
+                <Input
+                  id="refund-reason"
+                  type="text"
+                  placeholder="e.g. Customer cancelled, partial goodwill refund, parts unavailable"
+                  value={refundReason}
+                  onChange={(e) => setRefundReason(e.target.value)}
+                />
+              </div>
+
+              <div className="flex justify-end gap-2 pt-4 border-t">
+                <Button
+                  variant="secondary"
+                  onClick={() => setRefundModalOpen(false)}
+                  disabled={isSubmittingRefund}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  variant="danger"
+                  onClick={handleRecordRefund}
+                  isLoading={isSubmittingRefund}
+                >
+                  Confirm Refund
+                </Button>
               </div>
             </div>
           </FocusModal.Body>
