@@ -19,6 +19,7 @@ import { useEffect, useState, useRef, useCallback, useMemo } from "react";
 import { Wrench, DocumentText, ArrowPath, ArrowDownTray, Envelope, Sparkles, ChartBar } from "@medusajs/icons";
 import { useStoreCurrency } from "../../lib/use-store-currency";
 import { useNavigate } from "react-router-dom";
+import { RepairReportsTab } from "./components/repair-reports-tab";
 
 type RepairTicket = {
   id: string;
@@ -444,13 +445,34 @@ const RepairsPage = () => {
       return matchesSearch && matchesStatus;
     });
 
-  const [activeTab, setActiveTab] = useState("tickets");
+  const [activeTab, setActiveTab] = useState(() => {
+    if (typeof window !== "undefined") {
+      const tabParam = new URLSearchParams(window.location.search).get("tab");
+      if (tabParam && ["tickets", "notifications", "settings", "reports"].includes(tabParam)) {
+        return tabParam;
+      }
+    }
+    return "tickets";
+  });
+
+  const handleTabChange = (newTab: string) => {
+    setActiveTab(newTab);
+    if (typeof window !== "undefined") {
+      const url = new URL(window.location.href);
+      if (newTab === "tickets") {
+        url.searchParams.delete("tab");
+      } else {
+        url.searchParams.set("tab", newTab);
+      }
+      window.history.replaceState({}, "", url.toString());
+    }
+  };
 
   return (
     <Container className="p-0 overflow-hidden">
       <div className="flex border-b border-ui-border-base px-6 pt-2 space-x-6">
         <button
-          onClick={() => setActiveTab("tickets")}
+          onClick={() => handleTabChange("tickets")}
           className={`pb-3 text-sm font-medium transition-colors ${
             activeTab === "tickets"
               ? "border-b-2 border-ui-fg-base text-ui-fg-base"
@@ -460,7 +482,7 @@ const RepairsPage = () => {
           Repair Tickets
         </button>
         <button
-          onClick={() => setActiveTab("notifications")}
+          onClick={() => handleTabChange("notifications")}
           className={`pb-3 text-sm font-medium transition-colors ${
             activeTab === "notifications"
               ? "border-b-2 border-ui-fg-base text-ui-fg-base"
@@ -470,7 +492,7 @@ const RepairsPage = () => {
           Notification Templates
         </button>
         <button
-          onClick={() => setActiveTab("settings")}
+          onClick={() => handleTabChange("settings")}
           className={`pb-3 text-sm font-medium transition-colors ${
             activeTab === "settings"
               ? "border-b-2 border-ui-fg-base text-ui-fg-base"
@@ -480,8 +502,12 @@ const RepairsPage = () => {
           Settings & Integrations
         </button>
         <button
-          onClick={() => navigate("/repairs/reports")}
-          className="pb-3 text-sm font-medium transition-colors text-ui-fg-subtle hover:text-ui-fg-base flex items-center gap-1.5"
+          onClick={() => handleTabChange("reports")}
+          className={`pb-3 text-sm font-medium transition-colors flex items-center gap-1.5 ${
+            activeTab === "reports"
+              ? "border-b-2 border-ui-fg-base text-ui-fg-base"
+              : "text-ui-fg-subtle hover:text-ui-fg-base"
+          }`}
         >
           <ChartBar className="w-3.5 h-3.5" />
           Repair Reports
@@ -502,7 +528,7 @@ const RepairsPage = () => {
         <div className="flex items-center gap-2">
           <Button
             variant="secondary"
-            onClick={() => navigate("/repairs/reports")}
+            onClick={() => handleTabChange("reports")}
             className="flex items-center gap-1.5"
           >
             <ChartBar className="w-4 h-4" />
@@ -1445,6 +1471,8 @@ const RepairsPage = () => {
           </div>
         </div>
       )}
+
+      {activeTab === "reports" && <RepairReportsTab />}
 
     </Container>
   );
