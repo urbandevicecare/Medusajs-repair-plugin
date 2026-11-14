@@ -120,6 +120,8 @@ export default async function handleOrderPaid({
           repair_ticket_id: ticket.id,
           amount,
           order_id: order.id,
+          payment_method: "Paystack",
+          is_fully_paid: true,
         },
       });
     }

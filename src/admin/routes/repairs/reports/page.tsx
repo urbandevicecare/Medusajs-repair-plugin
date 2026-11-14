@@ -1,5 +1,5 @@
 import { defineRouteConfig } from "@medusajs/admin-sdk";
-import { Container, Heading, Text, Select, Button, Badge, Input, Table, Tabs } from "@medusajs/ui";
+import { Container, Heading, Text, Select, Button, Badge, Input, Table, Tabs, toast } from "@medusajs/ui";
 import {
   ChartBar,
   ArrowDownTray,
@@ -9,8 +9,10 @@ import {
   Clock,
   DocumentText,
   MagnifyingGlass,
+  Wrench,
 } from "@medusajs/icons";
 import { useEffect, useState, useMemo, useCallback } from "react";
+import { useNavigate } from "react-router-dom";
 import { useStoreCurrency } from "../../../lib/use-store-currency";
 import {
   AreaChart,
@@ -27,6 +29,7 @@ import {
 import { generateRepairReportCSV, EnrichedRepairTicket } from "../../../../utils/repair-analytics";
 
 const ReportsPage = () => {
+  const navigate = useNavigate();
   // Primary analytics and ticket states
   const [data, setData] = useState<any>(null);
   const [rawTickets, setRawTickets] = useState<EnrichedRepairTicket[]>([]);
@@ -116,12 +119,13 @@ const ReportsPage = () => {
 
       if (allTime) {
         const res = await fetch("/admin/repairs/analytics?timeframe=all", { credentials: "include" });
+        if (!res.ok) throw new Error("Failed to load all tickets: " + res.statusText);
         const resData = await res.json();
         ticketsToExport = resData.raw_tickets || [];
       }
 
       if (!ticketsToExport.length) {
-        alert("No data available to export.");
+        toast.error("No data available to export.");
         return;
       }
 
@@ -137,8 +141,9 @@ const ReportsPage = () => {
       link.click();
       document.body.removeChild(link);
       URL.revokeObjectURL(urlObj);
+      toast.success(`Successfully exported ${ticketsToExport.length} repair records.`);
     } catch (err: any) {
-      alert("Failed to export report: " + err.message);
+      toast.error("Failed to export report: " + err.message);
     }
   };
 
@@ -216,13 +221,18 @@ const ReportsPage = () => {
   // Payment badge styling helper
   const getPaymentBadge = (ticket: EnrichedRepairTicket) => {
     const pStatus = ticket.payment_status;
-    const isPaid = (pStatus === "captured" || pStatus === "paid") || (ticket.final_total > 0 && ticket.amount_paid >= ticket.final_total);
-    const isPartial = !isPaid && ticket.amount_paid > 0;
-    const isRefunded = pStatus === "refunded";
+    const isCaptured = pStatus === "captured" || pStatus === "paid";
+    const isRefunded = pStatus === "refunded" || ticket.metadata?.is_refunded;
+    const amountPaid = Number(ticket.amount_paid) || 0;
+    const finalTotal = Number(ticket.final_total) || 0;
 
     if (isRefunded) return <Badge color="orange">Refunded</Badge>;
-    if (isPaid) return <Badge color="green">Paid</Badge>;
-    if (isPartial) return <Badge color="orange">Partially Paid</Badge>;
+    if ((isCaptured && (amountPaid > 0 || finalTotal === 0)) || (amountPaid >= finalTotal && (finalTotal > 0 || amountPaid > 0))) {
+      return <Badge color="green">Paid</Badge>;
+    }
+    if (amountPaid > 0 && finalTotal > 0 && amountPaid < finalTotal) {
+      return <Badge color="orange">Partially Paid</Badge>;
+    }
     return <Badge color="red">Unpaid</Badge>;
   };
 
@@ -243,6 +253,16 @@ const ReportsPage = () => {
         </div>
 
         <div className="flex flex-wrap items-center gap-2.5">
+          <Button
+            variant="secondary"
+            size="small"
+            onClick={() => navigate("/repairs")}
+            className="flex items-center gap-1.5"
+          >
+            <Wrench className="w-3.5 h-3.5" />
+            Repair Tickets
+          </Button>
+
           <Button
             variant="secondary"
             size="small"
@@ -887,16 +907,22 @@ const ReportsPage = () => {
                     paginatedTickets.map((t) => (
                       <tr key={t.id} className="hover:bg-ui-bg-subtle/50 transition-colors">
                         <td className="py-3 px-4 font-semibold text-ui-fg-interactive">
-                          <a href={`/app/repairs/${t.id}`} className="hover:underline">
+                          <button
+                            type="button"
+                            onClick={() => navigate(`/repairs/${t.id}`)}
+                            className="hover:underline font-semibold text-ui-fg-interactive text-left"
+                          >
                             {t.ticket_number}
-                          </a>
+                          </button>
                         </td>
                         <td className="py-3 px-4">
                           <div className="font-medium text-ui-fg-base">
                             {t.device?.brand || ""} {t.device?.model_name || "Device"}
                           </div>
-                          {t.device?.serial_number && (
-                            <div className="text-[10px] text-ui-fg-muted">SN: {t.device.serial_number}</div>
+                          {(t.device?.serial_number || t.device?.imei) && (
+                            <div className="text-[10px] text-ui-fg-muted">
+                              {t.device.serial_number ? `SN: ${t.device.serial_number}` : `IMEI: ${t.device.imei}`}
+                            </div>
                           )}
                         </td>
                         <td className="py-3 px-4">

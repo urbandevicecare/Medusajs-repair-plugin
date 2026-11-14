@@ -16,7 +16,7 @@ import {
   Switch,
 } from "@medusajs/ui";
 import { useEffect, useState, useRef, useCallback, useMemo } from "react";
-import { Wrench, DocumentText, ArrowPath, ArrowDownTray, Envelope, Sparkles } from "@medusajs/icons";
+import { Wrench, DocumentText, ArrowPath, ArrowDownTray, Envelope, Sparkles, ChartBar } from "@medusajs/icons";
 import { useStoreCurrency } from "../../lib/use-store-currency";
 import { useNavigate } from "react-router-dom";
 
@@ -479,6 +479,13 @@ const RepairsPage = () => {
         >
           Settings & Integrations
         </button>
+        <button
+          onClick={() => navigate("/repairs/reports")}
+          className="pb-3 text-sm font-medium transition-colors text-ui-fg-subtle hover:text-ui-fg-base flex items-center gap-1.5"
+        >
+          <ChartBar className="w-3.5 h-3.5" />
+          Repair Reports
+        </button>
       </div>
       
       {activeTab === "tickets" && (
@@ -492,10 +499,19 @@ const RepairsPage = () => {
             </Badge>
           )}
         </div>
-        <FocusModal open={createModalOpen} onOpenChange={setCreateModalOpen}>
-          <FocusModal.Trigger asChild>
-            <Button variant="primary">Create Repair Ticket</Button>
-          </FocusModal.Trigger>
+        <div className="flex items-center gap-2">
+          <Button
+            variant="secondary"
+            onClick={() => navigate("/repairs/reports")}
+            className="flex items-center gap-1.5"
+          >
+            <ChartBar className="w-4 h-4" />
+            Repair Reports
+          </Button>
+          <FocusModal open={createModalOpen} onOpenChange={setCreateModalOpen}>
+            <FocusModal.Trigger asChild>
+              <Button variant="primary">Create Repair Ticket</Button>
+            </FocusModal.Trigger>
           <FocusModal.Content>
             <FocusModal.Header>
               <Button
@@ -882,6 +898,7 @@ const RepairsPage = () => {
             </FocusModal.Body>
           </FocusModal.Content>
         </FocusModal>
+        </div>
       </div>
 
       <div className="flex gap-4 mb-6">

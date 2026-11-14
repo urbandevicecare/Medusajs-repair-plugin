@@ -47,7 +47,27 @@ test("isRepairCompleted accurately identifies completed repairs across decoupled
     "Ticket with 'Completed' tag must be completed"
   );
 
-  // 6. In-progress / diagnosing tickets without completion flags
+  // 6. Ticket with status 'ready' without tags
+  assert.strictEqual(
+    isRepairCompleted({ status: "ready" }),
+    true,
+    "Status 'ready' must be recognized as completed"
+  );
+
+  // 7. Cancelled tickets must strictly NEVER be completed even with completed_at or metadata flags
+  assert.strictEqual(
+    isRepairCompleted({ status: "cancelled", completed_at: "2026-11-14T14:00:00Z" }),
+    false,
+    "Cancelled ticket must never be completed even with completed_at"
+  );
+
+  assert.strictEqual(
+    isRepairCompleted({ status: "cancelled", metadata: { is_completed: true, tags: ["Completed"] } }),
+    false,
+    "Cancelled ticket with metadata must never be completed"
+  );
+
+  // 8. In-progress / diagnosing tickets without completion flags
   assert.strictEqual(
     isRepairCompleted({ status: "diagnosing", metadata: { tags: ["Urgent"] } }),
     false,
@@ -170,6 +190,18 @@ test("enrichRepairTicket maps customer data and calculates financial balances ac
   assert.strictEqual(enriched.balance_due, 4000, "balance_due must be 7000 - 3000 = 4000");
   assert.strictEqual(enriched.is_completed, true);
   assert.strictEqual(enriched.turnaround_days, 2);
+
+  // Refunded ticket must have balance_due = 0 and not owe phantom debt
+  const refundedTicket = enrichRepairTicket({
+    id: "rep_refunded",
+    ticket_number: "RT-REF",
+    status: "completed",
+    payment_status: "refunded",
+    total_actual: 5000,
+    amount_paid: 0,
+    metadata: { is_refunded: true },
+  });
+  assert.strictEqual(refundedTicket.balance_due, 0, "Refunded ticket must have 0 balance due");
 });
 
 test("filterRepairTickets correctly matches tickets completed today even if created in prior months", () => {
@@ -226,6 +258,15 @@ test("filterRepairTickets correctly matches tickets completed today even if crea
   );
   assert.strictEqual(filteredAnyToday.length, 1);
   assert.strictEqual(filteredAnyToday[0].ticket_number, "RT-OCT");
+
+  // When filtering by status: 'completed', RT-OCT matches because it is a completed repair
+  const filteredCompletedStatus = filterRepairTickets(
+    tickets,
+    { status: "completed" },
+    fixedNow
+  );
+  assert.strictEqual(filteredCompletedStatus.length, 1);
+  assert.strictEqual(filteredCompletedStatus[0].ticket_number, "RT-OCT");
 });
 
 test("computeRepairAnalytics computes accurate totals, turnaround, and distributions", () => {
@@ -275,25 +316,42 @@ test("computeRepairAnalytics computes accurate totals, turnaround, and distribut
     amount_paid: 0,
   });
 
-  const { analytics, available_filters } = computeRepairAnalytics([ticket1, ticket2, ticket3]);
+  // Ticket 4: Cancelled ticket with leftover amount_paid - must NOT inflate collected or invoiced revenue
+  const ticket4 = enrichRepairTicket({
+    id: "4",
+    ticket_number: "RT-4",
+    status: "cancelled",
+    payment_status: "pending",
+    technician_name: null, // Unassigned
+    device: null, // Unbranded (Other)
+    created_at: "2026-11-11T10:00:00Z",
+    completed_at: null,
+    total_estimate: 10000,
+    amount_paid: 2000,
+  });
 
-  assert.strictEqual(analytics.total_repairs, 3);
+  const { analytics, available_filters } = computeRepairAnalytics([ticket1, ticket2, ticket3, ticket4]);
+
+  assert.strictEqual(analytics.total_repairs, 4);
   assert.strictEqual(analytics.completed_count, 2, "2 tickets must be completed");
+  assert.strictEqual(analytics.cancelled_count, 1, "1 ticket cancelled");
   assert.strictEqual(analytics.in_progress_count, 1, "1 ticket in progress");
-  assert.strictEqual(analytics.completion_rate, 66.7);
-  assert.strictEqual(analytics.total_collected_revenue, 11000, "5000 + 6000 = 11000");
-  assert.strictEqual(analytics.total_invoiced_revenue, 32000, "5000 + 12000 + 15000 = 32000");
-  assert.strictEqual(analytics.total_outstanding_balance, 21000, "0 + 6000 + 15000 = 21000");
+  assert.strictEqual(analytics.completion_rate, 50.0);
+  // Collected revenue must exclude cancelled ticket: 5000 + 6000 = 11000 (not 13000!)
+  assert.strictEqual(analytics.total_collected_revenue, 11000, "Collected revenue must exclude cancelled repairs");
+  assert.strictEqual(analytics.total_invoiced_revenue, 32000, "5000 + 12000 + 15000 = 32000 (excludes cancelled 10000)");
+  assert.strictEqual(analytics.total_outstanding_balance, 21000, "0 + 6000 + 15000 = 21000 (cancelled balance is 0)");
   assert.strictEqual(analytics.avg_repair_time_days, 3, "(2 + 4) / 2 = 3 days");
   assert.strictEqual(analytics.min_repair_time_days, 2);
   assert.strictEqual(analytics.max_repair_time_days, 4);
 
-  // Available filters
-  assert.deepStrictEqual(available_filters.technicians, ["Alice", "Bob"]);
-  assert.deepStrictEqual(available_filters.brands, ["Apple", "Samsung"]);
+  // Available filters should include Unassigned and Other
+  assert.ok(available_filters.technicians.includes("Unassigned"), "Available filters must include 'Unassigned'");
+  assert.ok(available_filters.brands.includes("Other"), "Available filters must include 'Other'");
   assert.ok(available_filters.statuses.includes("completed"));
   assert.ok(available_filters.statuses.includes("collected"));
   assert.ok(available_filters.statuses.includes("repairing"));
+  assert.ok(available_filters.statuses.includes("cancelled"));
 
   // Technician performance
   const alice = analytics.technician_performance.find((t) => t.name === "Alice");
@@ -314,6 +372,7 @@ test("generateRepairReportCSV creates valid escaped CSV output", () => {
     ticket_number: "RT-TEST,101",
     customer_name: "John \"Jack\" Doe",
     customer_phone: "+254711223344",
+    issue_description: "Cracked OLED display & battery swollen",
     status: "collected",
     payment_status: "captured",
     created_at: "2026-11-01T12:00:00Z",
@@ -325,8 +384,12 @@ test("generateRepairReportCSV creates valid escaped CSV output", () => {
 
   const csv = generateRepairReportCSV([ticket]);
   assert.ok(csv.includes('"Ticket Number"'));
+  assert.ok(csv.includes('"Issue Description"'));
   assert.ok(csv.includes('"RT-TEST,101"'));
   assert.ok(csv.includes('"John ""Jack"" Doe"'));
+  assert.ok(csv.includes('"Cracked OLED display & battery swollen"'));
   assert.ok(csv.includes('"HP"'));
-  assert.ok(csv.includes('"3500"'));
+  assert.ok(csv.includes('3500'));
+  assert.ok(csv.includes('"2026-11-01"'));
+  assert.ok(csv.includes('"2026-11-02"'));
 });

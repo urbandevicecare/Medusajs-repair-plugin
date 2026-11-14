@@ -115,8 +115,21 @@ export async function POST(req: MedusaRequest, res: MedusaResponse) {
   if (isReset) {
     try {
       const docService: any = req.scope.resolve("documents", { allowUnregistered: true });
-      if (docService && typeof docService.deleteReceiptsForRepairTicket === "function") {
-        await docService.deleteReceiptsForRepairTicket(id, req.scope);
+      if (docService) {
+        if (typeof docService.deleteReceiptsForRepairTicket === "function") {
+          await docService.deleteReceiptsForRepairTicket(id, req.scope);
+        }
+        const existingInvoices = await docService.listDocumentRecords({
+          repair_ticket_id: id,
+          type: "invoice",
+        }).catch(() => []);
+        for (const inv of existingInvoices) {
+          await docService.updateDocumentRecords({
+            id: inv.id,
+            payment_status: "unpaid",
+            status: "sent",
+          }).catch(() => {});
+        }
       }
     } catch (e) {
       req.scope.resolve("logger")?.warn?.(`[Mark Paid] Failed to delete receipts on reset: ${e}`);
@@ -137,9 +150,27 @@ export async function POST(req: MedusaRequest, res: MedusaResponse) {
           amount: amountRecorded,
           reference: reference || "Direct Payment",
           payment_method: method || "Cash",
+          is_fully_paid: isFullyPaid,
+          is_partially_paid: isPartiallyPaid,
         },
       });
       handledByDocumentsModule = true;
+
+      // Immediate synchronous update of any existing invoice document record so admin UI instantly reflects paid
+      try {
+        const existingInvoices = await docService.listDocumentRecords({
+          repair_ticket_id: id,
+          type: "invoice",
+        }).catch(() => []);
+        for (const inv of existingInvoices) {
+          const invStatus = isFullyPaid ? "paid" : (isPartiallyPaid ? "partially_paid" : "paid");
+          await docService.updateDocumentRecords({
+            id: inv.id,
+            payment_status: invStatus,
+            status: invStatus,
+          }).catch(() => {});
+        }
+      } catch (_) {}
     }
   } catch (e) {}
 

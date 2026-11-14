@@ -79,18 +79,23 @@ export type RepairAnalyticsResult = {
 /**
  * Checks whether a repair ticket is considered completed.
  * A repair ticket is completed if:
- * 1. It has completed_at set, OR
- * 2. It has status === "completed", OR
- * 3. It has status === "collected", OR
- * 4. It has metadata.is_completed === true, OR
- * 5. It contains the "Completed" tag in metadata.tags
+ * 1. It is NOT cancelled (status !== "cancelled" and metadata.is_cancelled !== true), AND
+ * 2. It has completed_at set, OR
+ * 3. It has status === "completed", OR
+ * 4. It has status === "collected" or collected_at set, OR
+ * 5. It has status === "ready", OR
+ * 6. It has metadata.is_completed === true, OR
+ * 7. It contains the "Completed" tag in metadata.tags
  */
 export function isRepairCompleted(ticket: any): boolean {
   if (!ticket || typeof ticket !== "object") return false;
+  if (ticket.status === "cancelled" || ticket.metadata?.is_cancelled === true) return false;
   return Boolean(
     ticket.completed_at ||
     ticket.status === "completed" ||
     ticket.status === "collected" ||
+    ticket.status === "ready" ||
+    ticket.collected_at ||
     ticket.metadata?.is_completed === true ||
     (Array.isArray(ticket.metadata?.tags) && ticket.metadata.tags.includes("Completed"))
   );
@@ -101,11 +106,14 @@ export function isRepairCompleted(ticket: any): boolean {
  */
 export function getRepairCompletionDate(ticket: any): Date | null {
   if (!ticket || typeof ticket !== "object") return null;
+  if (!isRepairCompleted(ticket)) return null;
+
   const rawDate =
     ticket.completed_at ||
     ticket.collected_at ||
     ticket.metadata?.completed_at ||
-    (isRepairCompleted(ticket) ? (ticket.updated_at || ticket.created_at) : null);
+    ticket.updated_at ||
+    ticket.created_at;
 
   if (!rawDate) return null;
   const d = new Date(rawDate);
@@ -148,6 +156,21 @@ export function getDateRangeFromTimeframe(
     const copy = new Date(d);
     copy.setHours(0, 0, 0, 0);
     return copy;
+  };
+
+  const parseLocalDateBound = (dateStr: string, isEnd: boolean = false): Date => {
+    const parts = dateStr.split("-");
+    if (parts.length === 3 && parts[0].length === 4) {
+      const year = parseInt(parts[0], 10);
+      const month = parseInt(parts[1], 10) - 1;
+      const day = parseInt(parts[2], 10);
+      if (isEnd) {
+        return new Date(year, month, day, 23, 59, 59, 999);
+      }
+      return new Date(year, month, day, 0, 0, 0, 0);
+    }
+    const d = new Date(dateStr);
+    return isEnd ? endOfDay(d) : startOfDay(d);
   };
 
   if (timeframe === "day") {
@@ -210,8 +233,8 @@ export function getDateRangeFromTimeframe(
   }
 
   if (timeframe === "custom") {
-    const s = customStart ? startOfDay(new Date(customStart)) : null;
-    const e = customEnd ? endOfDay(new Date(customEnd)) : endOfDay(now);
+    const s = customStart ? parseLocalDateBound(customStart, false) : null;
+    const e = customEnd ? parseLocalDateBound(customEnd, true) : endOfDay(now);
     return { startDate: s, endDate: e };
   }
 
@@ -256,8 +279,16 @@ export function enrichRepairTicket(
 
   // Derive final billed total and balance due
   const final_total = sanitized.total_actual > 0 ? sanitized.total_actual : sanitized.total_estimate;
+  const isRefunded =
+    sanitized.payment_status === "refunded" ||
+    sanitized.status === "refunded" ||
+    sanitized.metadata?.is_refunded === true;
+  const isCancelled =
+    sanitized.status === "cancelled" ||
+    sanitized.metadata?.is_cancelled === true;
+
   const balance_due =
-    sanitized.status === "cancelled" || sanitized.status === "refunded"
+    isCancelled || isRefunded
       ? 0
       : Math.max(0, final_total - sanitized.amount_paid);
 
@@ -324,10 +355,10 @@ export function filterRepairTickets(
 
     // 2. Physical Status filter
     if (status && status !== "all") {
-      if (status === "completed_only") {
+      if (status === "completed_only" || status === "completed") {
         if (!t.is_completed) return false;
       } else if (status === "in_progress") {
-        if (t.is_completed || t.status === "cancelled") return false;
+        if (t.is_completed || t.status === "cancelled" || t.status === "refunded") return false;
       } else {
         if (t.status !== status) return false;
       }
@@ -361,7 +392,9 @@ export function filterRepairTickets(
       const dBrand = (t.device?.brand || "").toLowerCase();
       const dModel = (t.device?.model_name || "").toLowerCase();
       const dSerial = (t.device?.serial_number || "").toLowerCase();
+      const dImei = (t.device?.imei || "").toLowerCase();
       const issue = (t.issue_description || "").toLowerCase();
+      const tech = (t.technician_name || "").toLowerCase();
 
       const matched =
         ticketNum.includes(searchQuery) ||
@@ -371,7 +404,9 @@ export function filterRepairTickets(
         dBrand.includes(searchQuery) ||
         dModel.includes(searchQuery) ||
         dSerial.includes(searchQuery) ||
-        issue.includes(searchQuery);
+        dImei.includes(searchQuery) ||
+        issue.includes(searchQuery) ||
+        tech.includes(searchQuery);
 
       if (!matched) return false;
     }
@@ -399,8 +434,8 @@ export function computeRepairAnalytics(
   const completed_tickets = filteredTickets.filter((t) => t.is_completed);
   const completed_count = completed_tickets.length;
   const completion_rate = total_repairs > 0 ? Number(((completed_count / total_repairs) * 100).toFixed(1)) : 0;
-  const cancelled_count = filteredTickets.filter((t) => t.status === "cancelled").length;
-  const in_progress_count = filteredTickets.filter((t) => !t.is_completed && t.status !== "cancelled").length;
+  const cancelled_count = filteredTickets.filter((t) => t.status === "cancelled" || t.status === "refunded").length;
+  const in_progress_count = filteredTickets.filter((t) => !t.is_completed && t.status !== "cancelled" && t.status !== "refunded").length;
 
   const status_counts: Record<string, number> = {};
   const payment_status_counts: Record<string, { count: number; amount: number }> = {
@@ -432,9 +467,8 @@ export function computeRepairAnalytics(
     payment_status_counts[pStatus].count++;
     payment_status_counts[pStatus].amount += t.amount_paid;
 
-    total_collected_revenue += t.amount_paid;
-
-    if (t.status !== "cancelled") {
+    if (t.status !== "cancelled" && t.status !== "refunded") {
+      total_collected_revenue += t.amount_paid;
       total_invoiced_revenue += t.final_total;
       total_expected_revenue += t.total_estimate;
       total_outstanding_balance += t.balance_due;
@@ -461,13 +495,13 @@ export function computeRepairAnalytics(
   // Monthly revenue trend grouping
   const monthlyRevenueMap: Record<string, MonthlyRevenuePoint> = {};
   for (const t of filteredTickets) {
-    if (t.status === "cancelled") continue;
+    if (t.status === "cancelled" || t.status === "refunded") continue;
 
     // Use completion date for completed tickets if available, otherwise created date
     const dateToUse = t.is_completed && t.effective_completed_at ? new Date(t.effective_completed_at) : new Date(t.created_at);
     if (isNaN(dateToUse.getTime())) continue;
 
-    const monthKey = `${dateToUse.toLocaleString("default", { month: "short" })} ${dateToUse.getFullYear()}`;
+    const monthKey = `${dateToUse.toLocaleString("en-US", { month: "short" })} ${dateToUse.getFullYear()}`;
     const timestamp = new Date(dateToUse.getFullYear(), dateToUse.getMonth(), 1).getTime();
 
     if (!monthlyRevenueMap[monthKey]) {
@@ -483,8 +517,11 @@ export function computeRepairAnalytics(
       };
     }
 
-    const pRev = t.parts_actual > 0 ? t.parts_actual : t.parts_estimate;
-    const lRev = t.labor_actual > 0 ? t.labor_actual : t.labor_estimate;
+    let pRev = t.parts_actual > 0 ? t.parts_actual : t.parts_estimate;
+    let lRev = t.labor_actual > 0 ? t.labor_actual : t.labor_estimate;
+    if (pRev === 0 && lRev === 0 && t.final_total > 0) {
+      pRev = t.final_total;
+    }
 
     monthlyRevenueMap[monthKey].partsRevenue += pRev;
     monthlyRevenueMap[monthKey].laborRevenue += lRev;
@@ -518,8 +555,10 @@ export function computeRepairAnalytics(
 
     techMap[techName].assignedCount++;
     if (t.is_completed) techMap[techName].completedCount++;
-    techMap[techName].totalCollected += t.amount_paid;
-    if (t.status !== "cancelled") techMap[techName].totalInvoiced += t.final_total;
+    if (t.status !== "cancelled" && t.status !== "refunded") {
+      techMap[techName].totalCollected += t.amount_paid;
+      techMap[techName].totalInvoiced += t.final_total;
+    }
     if (t.is_completed && t.turnaround_days !== null && t.turnaround_days >= 0) {
       techMap[techName].turnarounds.push(t.turnaround_days);
     }
@@ -553,8 +592,10 @@ export function computeRepairAnalytics(
     }
     brandMap[brandName].count++;
     if (t.is_completed) brandMap[brandName].completedCount++;
-    brandMap[brandName].totalCollected += t.amount_paid;
-    if (t.status !== "cancelled") brandMap[brandName].totalInvoiced += t.final_total;
+    if (t.status !== "cancelled" && t.status !== "refunded") {
+      brandMap[brandName].totalCollected += t.amount_paid;
+      brandMap[brandName].totalInvoiced += t.final_total;
+    }
   }
 
   const brand_performance: BrandPerformance[] = Object.entries(brandMap)
@@ -574,7 +615,11 @@ export function computeRepairAnalytics(
 
   for (const t of allTickets) {
     if (t.technician_name) techniciansSet.add(t.technician_name);
+    else techniciansSet.add("Unassigned");
+
     if (t.device?.brand) brandsSet.add(t.device.brand);
+    else brandsSet.add("Other");
+
     if (t.status) statusesSet.add(t.status);
   }
 
@@ -623,6 +668,7 @@ export function generateRepairReportCSV(tickets: EnrichedRepairTicket[]): string
     "Device Brand",
     "Device Model",
     "Serial Number / IMEI",
+    "Issue Description",
     "Technician",
     "Status",
     "Payment Status",
@@ -642,8 +688,16 @@ export function generateRepairReportCSV(tickets: EnrichedRepairTicket[]): string
 
   const escapeCell = (val: any) => {
     if (val === null || val === undefined) return '""';
+    if (typeof val === "number") return String(val);
     const str = String(val).replace(/"/g, '""');
     return `"${str}"`;
+  };
+
+  const formatIsoDate = (dStr: string | null | undefined): string => {
+    if (!dStr) return "";
+    const d = new Date(dStr);
+    if (isNaN(d.getTime())) return "";
+    return d.toISOString().slice(0, 10);
   };
 
   const rows = tickets.map((t) => [
@@ -654,12 +708,13 @@ export function generateRepairReportCSV(tickets: EnrichedRepairTicket[]): string
     t.device?.brand || "N/A",
     t.device?.model_name || "N/A",
     t.device?.serial_number || t.device?.imei || "N/A",
+    t.issue_description || "",
     t.technician_name || "Unassigned",
     t.status,
     t.payment_status,
     t.is_completed ? "Yes" : "No",
-    t.created_at ? new Date(t.created_at).toLocaleDateString() : "",
-    t.effective_completed_at ? new Date(t.effective_completed_at).toLocaleDateString() : "",
+    formatIsoDate(t.created_at),
+    formatIsoDate(t.effective_completed_at),
     t.turnaround_days !== null ? t.turnaround_days : "",
     t.parts_estimate,
     t.labor_estimate,

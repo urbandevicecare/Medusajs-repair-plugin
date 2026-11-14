@@ -185,3 +185,87 @@ test("Payment badge helper logic strictly prevents zero-payment tickets from sho
     { label: "Paid", color: "green" }
   );
 });
+
+test("POST /admin/repairs/:id/mark-paid updates ticket and synchronously updates invoice document record to paid", async () => {
+  const { POST } = await import("../src/api/admin/repairs/[id]/mark-paid/route.js");
+
+  let updatedDocPayload: any = null;
+  let emittedEvent: any = null;
+  let responseJson: any = null;
+
+  const mockTicket = {
+    id: "rep_mp_01",
+    ticket_number: "RT-1005",
+    status: "repairing",
+    payment_status: "pending",
+    total_estimate: 5000,
+    total_actual: 5000,
+    amount_paid: 0,
+    metadata: {},
+  };
+
+  const mockRepairService = {
+    listRepairTickets: async () => [mockTicket],
+    updateRepairTickets: async (updates: any) => ({ ...mockTicket, ...updates }),
+  };
+
+  const mockDocService = {
+    listDocumentRecords: async (filter: any) => {
+      if (filter.type === "invoice" && filter.repair_ticket_id === "rep_mp_01") {
+        return [
+          {
+            id: "doc_inv_mp_01",
+            type: "invoice",
+            payment_status: "unpaid",
+            status: "sent",
+            repair_ticket_id: "rep_mp_01",
+          },
+        ];
+      }
+      return [];
+    },
+    updateDocumentRecords: async (payload: any) => {
+      updatedDocPayload = payload;
+      return payload;
+    },
+  };
+
+  const mockEventBus = {
+    emit: async (event: any) => {
+      emittedEvent = event;
+    },
+  };
+
+  const mockReq: any = {
+    params: { id: "rep_mp_01" },
+    body: { amount: 5000, method: "Cash", reference: "REF_MP_01" },
+    scope: {
+      resolve: (key: string, opts?: any) => {
+        if (key === "repair") return mockRepairService;
+        if (key === "documents") return mockDocService;
+        if (key === "event_bus" || key === "eventBus") return mockEventBus;
+        if (key === "logger") return { info: () => {}, warn: () => {}, error: () => {} };
+        return null;
+      },
+    },
+  };
+
+  const mockRes: any = {
+    status: () => mockRes,
+    json: (data: any) => {
+      responseJson = data;
+    },
+  };
+
+  await POST(mockReq, mockRes);
+
+  assert.ok(responseJson, "Response JSON must be returned");
+  assert.strictEqual(responseJson.payment_status, "captured");
+  assert.strictEqual(responseJson.amount_paid, 5000);
+  assert.ok(updatedDocPayload, "Invoice document record must be updated synchronously");
+  assert.strictEqual(updatedDocPayload.payment_status, "paid", "Invoice payment_status must be paid");
+  assert.strictEqual(updatedDocPayload.status, "paid", "Invoice status must be paid");
+  assert.ok(emittedEvent, "repair.payment_received must be emitted");
+  assert.strictEqual(emittedEvent.name, "repair.payment_received");
+});
+
