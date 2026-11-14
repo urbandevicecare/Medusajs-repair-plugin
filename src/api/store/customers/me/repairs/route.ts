@@ -7,6 +7,7 @@ import {
   MedusaError,
   ContainerRegistrationKeys,
 } from "@medusajs/framework/utils";
+import { sanitizeRepairTicket } from "../../../../../utils/sanitize-ticket";
 
 // GET /store/customers/me/repairs - Get all repairs for logged-in customer
 export async function GET(
@@ -43,11 +44,14 @@ export async function GET(
       `[Store/Repairs] Found ${tickets.length} repair tickets for customer ${customerId}`,
     );
 
-    // Filter out internal notes for customer view
-    const formattedTickets = tickets.map((ticket: any) => ({
-      ...ticket,
-      notes: ticket.notes?.filter((note: any) => !note.is_internal) || [],
-    }));
+    // Filter out internal notes and sanitize numbers for customer view
+    const formattedTickets = tickets.map((t: any) => {
+      const ticket = sanitizeRepairTicket(t);
+      return {
+        ...ticket,
+        notes: ticket.notes?.filter((note: any) => !note.is_internal) || [],
+      };
+    });
 
     res.json({
       repair_tickets: formattedTickets,

@@ -381,18 +381,53 @@ const RepairsPage = () => {
       : customer.email || "Unknown";
   };
 
+  const parseNum = (val: any) => {
+    if (val === null || val === undefined) return 0;
+    if (typeof val === "object" && val !== null && "value" in val) {
+      const n = Number(val.value);
+      return isNaN(n) ? 0 : n;
+    }
+    const n = Number(val);
+    return isNaN(n) ? 0 : n;
+  };
+
+  const getTicketPaymentBadge = (ticket: any): { label: string; color: "green" | "orange" | "red" } => {
+    const amountPaid = parseNum(ticket.amount_paid);
+    const targetTotal = parseNum(ticket.total_actual) > 0 ? parseNum(ticket.total_actual) : parseNum(ticket.total_estimate);
+    const isCaptured = ticket.payment_status === "captured" || ticket.payment_status === "paid";
+    const isRefunded = ticket.payment_status === "refunded" || ticket.metadata?.is_refunded;
+
+    if (isRefunded) {
+      return { label: "Refunded", color: "orange" };
+    }
+
+    // Fully paid:
+    // (1) Captured/paid AND either amount was paid or total estimate is 0 (free/warranty)
+    // (2) OR amount paid covers target total (when target total > 0)
+    if ((isCaptured && (amountPaid > 0 || targetTotal === 0)) || (targetTotal > 0 && amountPaid >= targetTotal)) {
+      return { label: "Paid", color: "green" };
+    }
+
+    // Partially paid: Strictly requires money to have actually been paid (> 0)
+    if (amountPaid > 0 && (targetTotal === 0 || amountPaid < targetTotal)) {
+      return { label: "Partially Paid", color: "orange" };
+    }
+
+    // Zero payment made -> Always Unpaid
+    return { label: "Unpaid", color: "red" };
+  };
+
   const filteredTickets = tickets
     .map((ticket) => {
-      // Handle BigNumber parsing
-      const parseNum = (val: any) => {
-        if (typeof val === "object" && val !== null && "value" in val)
-          return Number(val.value);
-        if (val !== undefined) return Number(val);
-        return 0;
-      };
       return {
         ...ticket,
+        parts_estimate: parseNum(ticket.parts_estimate),
+        labor_estimate: parseNum(ticket.labor_estimate),
         total_estimate: parseNum(ticket.total_estimate),
+        parts_actual: parseNum(ticket.parts_actual),
+        labor_actual: parseNum(ticket.labor_actual),
+        total_actual: parseNum(ticket.total_actual),
+        amount_paid: parseNum(ticket.amount_paid),
       };
     })
     .filter((ticket) => {
@@ -943,24 +978,14 @@ const RepairsPage = () => {
                         Cancelled
                       </Badge>
                     )}
-                    {(ticket.payment_status === "refunded" || ticket.metadata?.is_refunded) && (
-                      <Badge color="orange" size="small">
-                        Refunded
-                      </Badge>
-                    )}
-                    {(Number(ticket.amount_paid || 0) > 0 && (ticket.payment_status === "captured" || ticket.payment_status === "paid")) ? (
-                      <Badge color="green" size="small">
-                        Paid
-                      </Badge>
-                    ) : (Number(ticket.amount_paid || 0) > 0 || ticket.payment_status === "partially_paid") ? (
-                      <Badge color="orange" size="small">
-                        Partially Paid
-                      </Badge>
-                    ) : (
-                      <Badge color="red" size="small">
-                        Unpaid
-                      </Badge>
-                    )}
+                    {(() => {
+                      const pStatus = getTicketPaymentBadge(ticket);
+                      return (
+                        <Badge color={pStatus.color} size="small">
+                          {pStatus.label}
+                        </Badge>
+                      );
+                    })()}
                   </div>
                 </Table.Cell>
                 <Table.Cell>

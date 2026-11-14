@@ -155,6 +155,46 @@ const RepairDetailPage = () => {
     return () => clearTimeout(delayDebounceFn);
   }, [technicianSearch]);
 
+  const parseNum = (val: any) => {
+    if (val === null || val === undefined) return 0;
+    if (typeof val === "object" && val !== null && "value" in val) {
+      const n = Number(val.value);
+      return isNaN(n) ? 0 : n;
+    }
+    const n = Number(val);
+    return isNaN(n) ? 0 : n;
+  };
+
+  const getPaymentStatusInfo = (t: any) => {
+    if (!t) return { label: "UNPAID", badgeLabel: "Unpaid", color: "red" as const, isPaid: false, isPartial: false };
+    const amountPaid = parseNum(t.amount_paid);
+    const targetTotal = parseNum(t.total_actual) > 0 ? parseNum(t.total_actual) : parseNum(t.total_estimate);
+    const isCaptured = t.payment_status === "captured" || t.payment_status === "paid";
+    const isRefunded = t.payment_status === "refunded" || t.metadata?.is_refunded;
+
+    if (isRefunded) {
+      return { label: "REFUNDED", badgeLabel: "Refunded", color: "orange" as const, isPaid: false, isPartial: false, isRefunded: true };
+    }
+
+    // Fully paid
+    if ((isCaptured && (amountPaid > 0 || targetTotal === 0)) || (targetTotal > 0 && amountPaid >= targetTotal)) {
+      return { label: "PAID", badgeLabel: "Paid", color: "green" as const, isPaid: true, isPartial: false };
+    }
+
+    // Partially paid: Strictly requires money to have actually been paid (> 0)
+    if (amountPaid > 0 && (targetTotal === 0 || amountPaid < targetTotal)) {
+      return {
+        label: "PARTIAL",
+        badgeLabel: `Partially Paid (${formatCurrency(amountPaid)})`,
+        color: "orange" as const,
+        isPaid: false,
+        isPartial: true,
+      };
+    }
+
+    return { label: "UNPAID", badgeLabel: "Unpaid", color: "red" as const, isPaid: false, isPartial: false };
+  };
+
   const loadTicket = async () => {
     try {
       if (!ticket) setLoading(true);
@@ -168,14 +208,6 @@ const RepairDetailPage = () => {
       }
 
       const t = data.repair_ticket;
-
-      // Handle BigNumber serialization correctly which can be an object or string
-      const parseNum = (val: any) => {
-        if (typeof val === "object" && val !== null && "value" in val)
-          return Number(val.value);
-        if (val !== undefined) return Number(val);
-        return 0;
-      };
 
       t.labor_estimate = parseNum(t.labor_estimate);
       t.parts_estimate = parseNum(t.parts_estimate);
@@ -527,7 +559,7 @@ const RepairDetailPage = () => {
       }
 
       // Step 2: Regenerate documents sequentially to prevent race conditions in Zoho
-      const isPaid = Number(ticket?.amount_paid || 0) > 0 && (ticket?.payment_status === "captured" || ticket?.payment_status === "paid" || (Array.isArray(ticket?.metadata?.tags) && ticket?.metadata?.tags.includes("Paid")));
+      const isPaid = getPaymentStatusInfo(ticket).isPaid;
       const docTypes = ["job_card", "quote", "invoice"];
       if (isPaid) {
         docTypes.push("receipt");
@@ -723,13 +755,12 @@ const RepairDetailPage = () => {
               {ticket.technician_name && (
                 <Badge color="purple">{ticket.technician_name}</Badge>
               )}
-              {(Number(ticket.amount_paid || 0) > 0 && (ticket.payment_status === "captured" || ticket.payment_status === "paid")) ? (
-                <Badge color="green">Paid</Badge>
-              ) : (Number(ticket.amount_paid || 0) > 0 || ticket.payment_status === "partially_paid") ? (
-                <Badge color="orange">Partially Paid ({formatCurrency(ticket.amount_paid || 0)})</Badge>
-              ) : (
-                <Badge color="red">Unpaid</Badge>
-              )}
+              {(() => {
+                const pStatus = getPaymentStatusInfo(ticket);
+                if (pStatus.label === "PAID") return <Badge color="green">Paid</Badge>;
+                if (pStatus.label === "PARTIAL") return <Badge color="orange">{pStatus.badgeLabel}</Badge>;
+                return <Badge color="red">Unpaid</Badge>;
+              })()}
             </div>
             {ticket.device && (
               <Text className="text-ui-fg-subtle mt-2">
@@ -883,13 +914,16 @@ const RepairDetailPage = () => {
                 <div className="relative">
                   <div className="flex justify-between items-center mb-1">
                     <span className="text-[10px] uppercase font-semibold text-ui-fg-muted tracking-wider block">Status</span>
-                    {Number(ticket?.amount_paid || 0) > 0 && (ticket?.payment_status === "captured" || ticket?.payment_status === "paid" || (Array.isArray(ticket?.metadata?.tags) && ticket?.metadata?.tags.includes("Paid"))) ? (
-                      <span className="text-[9px] font-bold px-1.5 py-0.5 bg-green-100 text-green-700 rounded-sm leading-none">PAID</span>
-                    ) : (Number(ticket?.amount_paid || 0) > 0 || ticket?.payment_status === "partially_paid" || (Array.isArray(ticket?.metadata?.tags) && ticket?.metadata?.tags.includes("Partially Paid"))) ? (
-                      <span className="text-[9px] font-bold px-1.5 py-0.5 bg-orange-100 text-orange-700 rounded-sm leading-none">PARTIAL</span>
-                    ) : (
-                      <span className="text-[9px] font-bold px-1.5 py-0.5 bg-red-100 text-red-700 rounded-sm leading-none">UNPAID</span>
-                    )}
+                    {(() => {
+                      const pStatus = getPaymentStatusInfo(ticket);
+                      if (pStatus.label === "PAID") {
+                        return <span className="text-[9px] font-bold px-1.5 py-0.5 bg-green-100 text-green-700 rounded-sm leading-none">PAID</span>;
+                      }
+                      if (pStatus.label === "PARTIAL") {
+                        return <span className="text-[9px] font-bold px-1.5 py-0.5 bg-orange-100 text-orange-700 rounded-sm leading-none">PARTIAL</span>;
+                      }
+                      return <span className="text-[9px] font-bold px-1.5 py-0.5 bg-red-100 text-red-700 rounded-sm leading-none">UNPAID</span>;
+                    })()}
                   </div>
                   <div className="flex items-center border border-ui-border-base rounded-md overflow-hidden bg-ui-bg-base focus-within:ring-2 focus-within:ring-ui-fg-interactive transition-all">
                     <select 
@@ -1262,11 +1296,11 @@ const RepairDetailPage = () => {
                     <button 
                       onClick={openPaymentModal}
                       disabled={loading}
-                      className={`py-1.5 text-[11px] uppercase tracking-wider font-semibold text-ui-fg-base bg-ui-bg-subtle hover:bg-ui-bg-subtle-hover rounded-md transition-colors disabled:opacity-50 ${(Number(ticket.amount_paid || 0) > 0 && (ticket.payment_status === "paid" || ticket.payment_status === "captured")) ? "col-span-2" : ""}`}
+                      className={`py-1.5 text-[11px] uppercase tracking-wider font-semibold text-ui-fg-base bg-ui-bg-subtle hover:bg-ui-bg-subtle-hover rounded-md transition-colors disabled:opacity-50 ${getPaymentStatusInfo(ticket).isPaid ? "col-span-2" : ""}`}
                     >
-                      {Number(ticket.amount_paid || 0) > 0 && (ticket.payment_status === "paid" || ticket.payment_status === "captured")
+                      {getPaymentStatusInfo(ticket).isPaid
                         ? "Manage / Reset Payment"
-                        : (ticket.amount_paid || 0) > 0
+                        : getPaymentStatusInfo(ticket).isPartial
                         ? "Record Payment / Add Cash"
                         : "Record Payment (Cash/Card)"}
                     </button>
@@ -1282,9 +1316,19 @@ const RepairDetailPage = () => {
                       <span className="text-[9px] uppercase font-bold text-ui-fg-muted tracking-wider">
                         APPR: {new Date(ticket.approved_at!).toLocaleDateString()}
                       </span>
-                      <span className={`text-[9px] uppercase font-bold px-1.5 py-0.5 rounded-sm leading-none tracking-wider ${Number(ticket.amount_paid || 0) > 0 && (ticket.payment_status === "paid" || ticket.payment_status === "captured") ? 'bg-green-100 text-green-700' : ticket.payment_status === 'partially_paid' || (ticket.amount_paid || 0) > 0 ? 'bg-orange-100 text-orange-700' : 'bg-red-100 text-red-700'}`}>
-                        {Number(ticket.amount_paid || 0) > 0 && (ticket.payment_status === "captured" || ticket.payment_status === "paid") ? "PAID" : ticket.payment_status === "partially_paid" || (ticket.amount_paid || 0) > 0 ? "PARTIAL" : "UNPAID"}
-                      </span>
+                      {(() => {
+                        const pStatus = getPaymentStatusInfo(ticket);
+                        const bgClass = pStatus.label === "PAID"
+                          ? "bg-green-100 text-green-700"
+                          : pStatus.label === "PARTIAL"
+                          ? "bg-orange-100 text-orange-700"
+                          : "bg-red-100 text-red-700";
+                        return (
+                          <span className={`text-[9px] uppercase font-bold px-1.5 py-0.5 rounded-sm leading-none tracking-wider ${bgClass}`}>
+                            {pStatus.label}
+                          </span>
+                        );
+                      })()}
                     </div>
                   </div>
                 </div>

@@ -3,6 +3,7 @@ import {
   MedusaError,
   ContainerRegistrationKeys,
 } from "@medusajs/framework/utils";
+import { sanitizeRepairTicket } from "../../../../utils/sanitize-ticket";
 
 // GET /admin/repairs/:id - Get single repair ticket
 export async function GET(
@@ -23,6 +24,9 @@ export async function GET(
       `Repair ticket with id ${req.params.id} not found`,
     );
   }
+
+  const rawTicket = data[0];
+  const sanitizedTicket = sanitizeRepairTicket(rawTicket);
 
   // Fetch linked product variants (parts)
   let parts = [];
@@ -51,12 +55,12 @@ export async function GET(
   }
 
   let customerInfo: any = null;
-  if (data[0].customer_id) {
+  if (sanitizedTicket.customer_id) {
     try {
       const { data: customers } = await query.graph({
         entity: "customer",
         fields: ["first_name", "last_name", "phone"],
-        filters: { id: [data[0].customer_id] },
+        filters: { id: [sanitizedTicket.customer_id] },
       });
       if (customers && customers.length > 0) {
         customerInfo = customers[0];
@@ -72,7 +76,7 @@ export async function GET(
     if (docService && typeof docService.listDocumentRecords === "function") {
       const records = await docService.listDocumentRecords({ repair_ticket_id: req.params.id }).catch(() => []);
       if (Array.isArray(records)) {
-        const isTicketPaid = Number(data[0]?.amount_paid || 0) > 0 && (data[0]?.payment_status === "captured" || data[0]?.payment_status === "paid");
+        const isTicketPaid = (sanitizedTicket.amount_paid > 0 || sanitizedTicket.total_estimate === 0) && (sanitizedTicket.payment_status === "captured" || sanitizedTicket.payment_status === "paid");
         availableDocuments = records
           .filter((r: any) => isTicketPaid || r.type !== "receipt")
           .map((r: any) => r.type === "estimate" ? "quote" : r.type);
@@ -82,7 +86,7 @@ export async function GET(
 
   res.json({
     repair_ticket: {
-      ...data[0],
+      ...sanitizedTicket,
       customer: customerInfo,
       customer_phone: customerInfo?.phone || "",
       parts,

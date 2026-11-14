@@ -1,6 +1,7 @@
 import { MedusaRequest, MedusaResponse } from "@medusajs/framework/http";
 import { createRepairTicketWorkflow } from "../../../workflows/create-repair-ticket-workflow";
 import { ContainerRegistrationKeys } from "@medusajs/framework/utils";
+import { sanitizeRepairTicket } from "../../../utils/sanitize-ticket";
 
 // GET /admin/repairs - List all repair tickets
 export async function GET(req: MedusaRequest, res: MedusaResponse) {
@@ -31,8 +32,10 @@ export async function GET(req: MedusaRequest, res: MedusaResponse) {
     },
   });
 
+  const sanitizedTickets = Array.isArray(data) ? data.map(sanitizeRepairTicket) : [];
+
   res.json({
-    repair_tickets: data,
+    repair_tickets: sanitizedTickets,
     count: metadata?.count ?? data.length,
     offset,
     limit,

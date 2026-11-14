@@ -3,6 +3,7 @@ import {
   ContainerRegistrationKeys,
   MedusaError,
 } from "@medusajs/framework/utils";
+import { sanitizeRepairTicket } from "../../../../../utils/sanitize-ticket";
 
 export async function GET(
   req: MedusaRequest<{ token: string }>,
@@ -23,7 +24,7 @@ export async function GET(
     );
   }
 
-  const ticket = tickets[0];
+  const ticket = sanitizeRepairTicket(tickets[0]);
   const fullPayload = {
     ...ticket,
     notes: ticket.notes?.filter((note: any) => !note.is_internal) || [],

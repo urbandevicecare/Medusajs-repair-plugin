@@ -27,11 +27,19 @@ export const useStoreCurrency = () => {
       });
   }, []);
 
-  const formatCurrency = (amount: number) => {
+  const formatCurrency = (amount: any) => {
+    let numeric = 0;
+    if (typeof amount === "object" && amount !== null && "value" in amount) {
+      numeric = Number(amount.value);
+    } else if (amount !== undefined && amount !== null) {
+      numeric = Number(amount);
+    }
+    if (isNaN(numeric)) numeric = 0;
+
     return new Intl.NumberFormat(window.navigator.language || "en-US", {
       style: "currency",
       currency: currencyCode,
-    }).format(amount);
+    }).format(numeric);
   };
 
   return { currencyCode, formatCurrency };
