@@ -15,7 +15,7 @@ import {
   Tabs,
   Switch,
 } from "@medusajs/ui";
-import { useEffect, useState, useRef, useCallback } from "react";
+import { useEffect, useState, useRef, useCallback, useMemo } from "react";
 import { Wrench, DocumentText, ArrowPath, ArrowDownTray, Envelope, Sparkles } from "@medusajs/icons";
 import { useStoreCurrency } from "../../lib/use-store-currency";
 import { useNavigate } from "react-router-dom";
