@@ -4,6 +4,7 @@ import {
   WorkflowResponse,
 } from "@medusajs/framework/workflows-sdk";
 import { updateRepairCostsStep } from "../../../../../workflows/steps/update-repair-costs";
+import { sanitizeRepairTicket } from "../../../../../utils/sanitize-ticket";
 
 const updateRepairCostsWorkflow = createWorkflow(
   "update-repair-costs-workflow",
@@ -43,6 +44,6 @@ export async function POST(
   });
 
   res.json({
-    repair_ticket: result.repairTicket,
+    repair_ticket: sanitizeRepairTicket(result.repairTicket),
   });
 }

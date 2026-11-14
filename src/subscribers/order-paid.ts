@@ -6,6 +6,7 @@ import { Modules } from "@medusajs/framework/utils";
 import { REPAIR_MODULE } from "../modules/repair";
 import RepairModuleService from "../modules/repair/service";
 import { getRepairTemplate } from "../utils/templates/repair";
+import { parseNumberField } from "../utils/sanitize-ticket";
 
 export default async function handleOrderPaid({
   event: { data },
@@ -78,7 +79,9 @@ export default async function handleOrderPaid({
     }
   }
 
-  const amount = Number(order.total || ticket.total_actual || ticket.total_estimate || 0);
+  const orderTotal = parseNumberField(order.total);
+  const ticketTotal = parseNumberField(ticket.total_actual) > 0 ? parseNumberField(ticket.total_actual) : parseNumberField(ticket.total_estimate);
+  const amount = orderTotal > 0 ? orderTotal : ticketTotal;
 
   // Update repair ticket payment status and tag
   try {

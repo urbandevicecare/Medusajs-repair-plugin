@@ -3,6 +3,7 @@ import { REPAIR_MODULE } from "../../../../../modules/repair";
 import RepairModuleService from "../../../../../modules/repair/service";
 import { Modules } from "@medusajs/framework/utils";
 import { getRepairTemplate } from "../../../../../utils/templates/repair";
+import { sanitizeRepairTicket } from "../../../../../utils/sanitize-ticket";
 
 export async function POST(
   req: MedusaRequest<{
@@ -77,6 +78,6 @@ export async function POST(
   }
 
   res.json({
-    repair_ticket: updatedTicket,
+    repair_ticket: sanitizeRepairTicket(updatedTicket),
   });
 }

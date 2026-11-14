@@ -402,14 +402,14 @@ const RepairsPage = () => {
     }
 
     // Fully paid:
-    // (1) Captured/paid AND either amount was paid or total estimate is 0 (free/warranty)
-    // (2) OR amount paid covers target total (when target total > 0)
-    if ((isCaptured && (amountPaid > 0 || targetTotal === 0)) || (targetTotal > 0 && amountPaid >= targetTotal)) {
+    // (1) Marked captured/paid and (amount paid > 0 or 0 cost warranty/free)
+    // (2) OR amount paid covers target total (when target total > 0 or amount paid > 0)
+    if ((isCaptured && (amountPaid > 0 || targetTotal === 0)) || (amountPaid >= targetTotal && (targetTotal > 0 || amountPaid > 0))) {
       return { label: "Paid", color: "green" };
     }
 
-    // Partially paid: Strictly requires money to have actually been paid (> 0)
-    if (amountPaid > 0 && (targetTotal === 0 || amountPaid < targetTotal)) {
+    // Partially paid: Strictly requires money to have actually been paid (> 0) and less than targetTotal
+    if (amountPaid > 0 && targetTotal > 0 && amountPaid < targetTotal) {
       return { label: "Partially Paid", color: "orange" };
     }
 

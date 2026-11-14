@@ -177,12 +177,12 @@ const RepairDetailPage = () => {
     }
 
     // Fully paid
-    if ((isCaptured && (amountPaid > 0 || targetTotal === 0)) || (targetTotal > 0 && amountPaid >= targetTotal)) {
+    if ((isCaptured && (amountPaid > 0 || targetTotal === 0)) || (amountPaid >= targetTotal && (targetTotal > 0 || amountPaid > 0))) {
       return { label: "PAID", badgeLabel: "Paid", color: "green" as const, isPaid: true, isPartial: false };
     }
 
-    // Partially paid: Strictly requires money to have actually been paid (> 0)
-    if (amountPaid > 0 && (targetTotal === 0 || amountPaid < targetTotal)) {
+    // Partially paid: Strictly requires money to have actually been paid (> 0) and less than targetTotal
+    if (amountPaid > 0 && targetTotal > 0 && amountPaid < targetTotal) {
       return {
         label: "PARTIAL",
         badgeLabel: `Partially Paid (${formatCurrency(amountPaid)})`,
@@ -747,16 +747,18 @@ const RepairDetailPage = () => {
               {(ticket.status === "cancelled" || ticket.metadata?.is_cancelled) && (
                 <Badge color="red">Cancelled</Badge>
               )}
-              {(ticket.payment_status === "refunded" || ticket.metadata?.is_refunded) && (
-                <Badge color="orange">
-                  {ticket.metadata?.last_refund_amount ? `Refunded (${formatCurrency(ticket.metadata.last_refund_amount)})` : "Refunded"}
-                </Badge>
-              )}
               {ticket.technician_name && (
                 <Badge color="purple">{ticket.technician_name}</Badge>
               )}
               {(() => {
                 const pStatus = getPaymentStatusInfo(ticket);
+                if (pStatus.label === "REFUNDED") {
+                  return (
+                    <Badge color="orange">
+                      {ticket.metadata?.last_refund_amount ? `Refunded (${formatCurrency(ticket.metadata.last_refund_amount)})` : "Refunded"}
+                    </Badge>
+                  );
+                }
                 if (pStatus.label === "PAID") return <Badge color="green">Paid</Badge>;
                 if (pStatus.label === "PARTIAL") return <Badge color="orange">{pStatus.badgeLabel}</Badge>;
                 return <Badge color="red">Unpaid</Badge>;
@@ -921,6 +923,9 @@ const RepairDetailPage = () => {
                       }
                       if (pStatus.label === "PARTIAL") {
                         return <span className="text-[9px] font-bold px-1.5 py-0.5 bg-orange-100 text-orange-700 rounded-sm leading-none">PARTIAL</span>;
+                      }
+                      if (pStatus.label === "REFUNDED") {
+                        return <span className="text-[9px] font-bold px-1.5 py-0.5 bg-orange-100 text-orange-700 rounded-sm leading-none">REFUNDED</span>;
                       }
                       return <span className="text-[9px] font-bold px-1.5 py-0.5 bg-red-100 text-red-700 rounded-sm leading-none">UNPAID</span>;
                     })()}
@@ -1284,7 +1289,7 @@ const RepairDetailPage = () => {
               {ticket.status !== "cancelled" && (
                 <div className="mt-4 pt-3 border-t space-y-2">
                   <div className="grid grid-cols-2 gap-2">
-                    {ticket.payment_status !== "paid" && ticket.payment_status !== "captured" && (
+                    {!getPaymentStatusInfo(ticket).isPaid && !getPaymentStatusInfo(ticket).isRefunded && (
                       <button 
                         onClick={handleStkPush}
                         disabled={loading || isPushingStk}
@@ -1320,7 +1325,7 @@ const RepairDetailPage = () => {
                         const pStatus = getPaymentStatusInfo(ticket);
                         const bgClass = pStatus.label === "PAID"
                           ? "bg-green-100 text-green-700"
-                          : pStatus.label === "PARTIAL"
+                          : pStatus.label === "PARTIAL" || pStatus.label === "REFUNDED"
                           ? "bg-orange-100 text-orange-700"
                           : "bg-red-100 text-red-700";
                         return (

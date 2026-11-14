@@ -2,6 +2,7 @@ import { MedusaRequest, MedusaResponse } from "@medusajs/framework/http";
 import { REPAIR_MODULE } from "../../../../../modules/repair";
 import RepairModuleService from "../../../../../modules/repair/service";
 import { syncPaymentToZoho } from "../../../../../utils/zoho-payment-sync.js";
+import { sanitizeRepairTicket } from "../../../../../utils/sanitize-ticket";
 
 export async function POST(req: MedusaRequest, res: MedusaResponse) {
   const { id } = req.params;
@@ -45,8 +46,8 @@ export async function POST(req: MedusaRequest, res: MedusaResponse) {
     newAmountPaid = currentPaid + amountRecorded;
   }
 
-  const isFullyPaid = !isReset && newAmountPaid >= targetTotal && targetTotal > 0;
-  const isPartiallyPaid = !isReset && !isFullyPaid && newAmountPaid > 0;
+  const isFullyPaid = !isReset && ((targetTotal > 0 && newAmountPaid >= targetTotal) || (targetTotal === 0 && (amount !== undefined || currentPaid >= 0)));
+  const isPartiallyPaid = !isReset && !isFullyPaid && newAmountPaid > 0 && targetTotal > 0 && newAmountPaid < targetTotal;
 
   const paymentStatus = isFullyPaid ? "captured" : isPartiallyPaid ? "partially_paid" : "pending";
 
@@ -159,7 +160,7 @@ export async function POST(req: MedusaRequest, res: MedusaResponse) {
       : isPartiallyPaid
       ? `Recorded partial payment of ${amountRecorded}. Remaining balance: ${Math.max(0, targetTotal - newAmountPaid)}`
       : "Payment recorded",
-    repair_ticket: updatedTicket,
+    repair_ticket: sanitizeRepairTicket(updatedTicket),
     amount_paid: newAmountPaid,
     payment_status: paymentStatus,
     remaining_balance: Math.max(0, targetTotal - newAmountPaid),

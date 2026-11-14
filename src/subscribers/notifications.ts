@@ -7,6 +7,7 @@ import {
 import { getRepairTemplate } from "../utils/templates/repair";
 import { REPAIR_MODULE } from "../modules/repair";
 import RepairModuleService from "../modules/repair/service";
+import { parseNumberField } from "../utils/sanitize-ticket";
 
 // Customer milestone statuses that warrant customer notifications
 const CUSTOMER_MILESTONES = [
@@ -191,8 +192,9 @@ export default async function globalNotificationHandler({
       // ---------------------------------------------------------
       // DOCUMENT LINK HANDOVER & RESOLUTION
       // ---------------------------------------------------------
-      const amountPaidNum = Number(ticket.amount_paid || 0);
-      const isPaid = (ticket.payment_status === "captured" || ticket.payment_status === "paid") && amountPaidNum > 0;
+      const amountPaidNum = parseNumberField(ticket.amount_paid);
+      const targetTotalNum = parseNumberField(ticket.total_actual) > 0 ? parseNumberField(ticket.total_actual) : parseNumberField(ticket.total_estimate);
+      const isPaid = (ticket.payment_status === "captured" || ticket.payment_status === "paid") && (amountPaidNum > 0 || targetTotalNum === 0);
 
       let expectedType: string | undefined = undefined;
       if (eventName === "repair.payment_received" && (amountPaidNum > 0 || Number((data as any)?.amount || 0) > 0)) {

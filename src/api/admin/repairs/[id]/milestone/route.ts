@@ -2,6 +2,7 @@ import { MedusaRequest, MedusaResponse } from "@medusajs/framework/http";
 import { REPAIR_MODULE } from "../../../../../modules/repair";
 import RepairModuleService from "../../../../../modules/repair/service";
 import { Modules } from "@medusajs/framework/utils";
+import { parseNumberField, sanitizeRepairTicket } from "../../../../../utils/sanitize-ticket";
 
 // POST /admin/repairs/:id/milestone
 // Manages explicit physical milestone flags (completed, collected, cancelled, refund)
@@ -112,7 +113,7 @@ export async function POST(
       return res.status(400).json({ message: "Invalid refund amount" });
     }
 
-    const currentPaid = Number(ticket.amount_paid || 0);
+    const currentPaid = parseNumberField(ticket.amount_paid);
     const newPaid = Math.max(0, currentPaid - refundAmt);
     const isFullRefund = refundAmt >= currentPaid;
 
@@ -184,6 +185,6 @@ export async function POST(
   return res.json({
     success: true,
     message: `Milestone ${milestone} updated successfully`,
-    repair_ticket: updatedTicket,
+    repair_ticket: sanitizeRepairTicket(updatedTicket),
   });
 }

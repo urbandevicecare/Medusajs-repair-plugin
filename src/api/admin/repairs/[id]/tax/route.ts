@@ -1,5 +1,6 @@
 import { MedusaRequest, MedusaResponse } from "@medusajs/framework/http";
 import { toggleRepairTaxWorkflow } from "../../../../../workflows/toggle-repair-tax-workflow";
+import { sanitizeRepairTicket } from "../../../../../utils/sanitize-ticket";
 
 export async function POST(
   req: MedusaRequest<{ apply_tax: boolean }>,
@@ -14,5 +15,5 @@ export async function POST(
     },
   });
 
-  res.json({ repair_ticket: result });
+  res.json({ repair_ticket: sanitizeRepairTicket(result) });
 }

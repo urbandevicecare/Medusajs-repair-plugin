@@ -1,6 +1,7 @@
 import { MedusaRequest, MedusaResponse } from "@medusajs/framework/http";
 import RepairModuleService from "../../../../../../modules/repair/service";
 import { REPAIR_MODULE } from "../../../../../../modules/repair";
+import { sanitizeRepairTicket } from "../../../../../../utils/sanitize-ticket";
 
 // DELETE /admin/repairs/:id/custom-parts/:index - Remove a custom part
 export async function DELETE(req: MedusaRequest, res: MedusaResponse) {
@@ -52,5 +53,5 @@ export async function DELETE(req: MedusaRequest, res: MedusaResponse) {
     total_estimate: newTotalEstimate,
   });
 
-  res.json({ repair_ticket: updatedTicket });
+  res.json({ repair_ticket: sanitizeRepairTicket(updatedTicket) });
 }

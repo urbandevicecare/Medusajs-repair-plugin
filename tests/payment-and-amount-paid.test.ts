@@ -75,6 +75,46 @@ test("sanitizeRepairTicket preserves legitimate partial and full payments", () =
   assert.ok(sanitizedFull.metadata.tags.includes("Paid"));
 });
 
+test("sanitizeRepairTicket heals corrupted partially_paid status and non-zero amount_paid when no payments exist", () => {
+  const corruptedPartial = {
+    id: "rep_corrupted",
+    ticket_number: "RT-CORRUPTED",
+    status: "repairing",
+    payment_status: "partially_paid",
+    total_estimate: { value: "3000", precision: 20 },
+    amount_paid: { value: "3000", precision: 20 },
+    metadata: {
+      tags: ["Partially Paid", "Urgent"],
+      payment_history: [],
+    },
+  };
+
+  const sanitized = sanitizeRepairTicket(corruptedPartial);
+  assert.strictEqual(sanitized.amount_paid, 0, "amount_paid must be healed to 0");
+  assert.strictEqual(sanitized.payment_status, "pending", "payment_status must be healed to pending");
+  assert.deepStrictEqual(sanitized.raw_amount_paid, { value: "0", precision: 20 }, "raw_amount_paid must be synchronized to 0");
+  assert.deepStrictEqual(sanitized.metadata.tags, ["Urgent"], "Stale 'Partially Paid' tag must be removed");
+});
+
+test("sanitizeRepairTicket removes stale 'Paid' tag when amount_paid is 0 and status is not captured", () => {
+  const stalePaidTicket = {
+    id: "rep_stale",
+    ticket_number: "RT-STALE",
+    status: "completed",
+    payment_status: "pending",
+    total_estimate: 5000,
+    amount_paid: 0,
+    metadata: {
+      tags: ["Paid", "Completed"],
+    },
+  };
+
+  const sanitized = sanitizeRepairTicket(stalePaidTicket);
+  assert.strictEqual(sanitized.amount_paid, 0);
+  assert.strictEqual(sanitized.payment_status, "pending");
+  assert.deepStrictEqual(sanitized.metadata.tags, ["Completed"], "'Paid' tag must be removed");
+});
+
 test("Payment badge helper logic strictly prevents zero-payment tickets from showing Partially Paid", () => {
   const getTicketPaymentBadge = (ticket: any): { label: string; color: "green" | "orange" | "red" } => {
     const amountPaid = parseNumberField(ticket.amount_paid);
@@ -86,11 +126,11 @@ test("Payment badge helper logic strictly prevents zero-payment tickets from sho
       return { label: "Refunded", color: "orange" };
     }
 
-    if ((isCaptured && (amountPaid > 0 || targetTotal === 0)) || (targetTotal > 0 && amountPaid >= targetTotal)) {
+    if ((isCaptured && (amountPaid > 0 || targetTotal === 0)) || (amountPaid >= targetTotal && (targetTotal > 0 || amountPaid > 0))) {
       return { label: "Paid", color: "green" };
     }
 
-    if (amountPaid > 0 && (targetTotal === 0 || amountPaid < targetTotal)) {
+    if (amountPaid > 0 && targetTotal > 0 && amountPaid < targetTotal) {
       return { label: "Partially Paid", color: "orange" };
     }
 
@@ -137,5 +177,11 @@ test("Payment badge helper logic strictly prevents zero-payment tickets from sho
   assert.deepStrictEqual(
     getTicketPaymentBadge({ amount_paid: 0, total_estimate: 3000, payment_status: "refunded" }),
     { label: "Refunded", color: "orange" }
+  );
+
+  // 8. Zero estimate with positive payment -> MUST BE Paid
+  assert.deepStrictEqual(
+    getTicketPaymentBadge({ amount_paid: 500, total_estimate: 0, payment_status: "pending" }),
+    { label: "Paid", color: "green" }
   );
 });

@@ -6,6 +6,7 @@ import {
 import { generateRepairDocument } from "../../../../../utils/generate-repair-document";
 import { REPAIR_MODULE } from "../../../../../modules/repair";
 import RepairModuleService from "../../../../../modules/repair/service";
+import { sanitizeRepairTicket } from "../../../../../utils/sanitize-ticket";
 
 // GET /admin/repairs/:id/document?type=job_card | receipt | invoice | quote
 export async function GET(
@@ -62,7 +63,7 @@ export async function GET(
   }
 
   const payloadTicket = {
-    ...ticket,
+    ...sanitizeRepairTicket(ticket),
     parts,
   };
 
@@ -125,6 +126,6 @@ export async function DELETE(
   return res.json({
     success: true,
     message: "All generated documents have been deleted and cleared.",
-    repair_ticket: updatedTicket,
+    repair_ticket: sanitizeRepairTicket(updatedTicket),
   });
 }

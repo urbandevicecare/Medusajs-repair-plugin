@@ -1,4 +1,5 @@
 import { MedusaRequest, MedusaResponse } from "@medusajs/framework/http";
+import { parseNumberField } from "./sanitize-ticket";
 
 // Format helpers
 export const formatCurrency = (amount: number) => {
@@ -50,9 +51,10 @@ export async function generateRepairDocument(
   const cleanType = (docType || "job_card").toLowerCase().trim();
   const typeFilter = cleanType === "quote" ? "estimate" : cleanType;
 
-  const amountPaidNum = Number(ticket.amount_paid || 0);
-  const isPaid = (ticket.payment_status === "paid" || ticket.payment_status === "captured") && amountPaidNum > 0;
-  if (cleanType === "receipt" && (!isPaid || amountPaidNum <= 0)) {
+  const amountPaidNum = parseNumberField(ticket.amount_paid);
+  const totalTargetNum = parseNumberField(ticket.total_actual) > 0 ? parseNumberField(ticket.total_actual) : parseNumberField(ticket.total_estimate);
+  const isPaid = (ticket.payment_status === "paid" || ticket.payment_status === "captured") && (amountPaidNum > 0 || totalTargetNum === 0);
+  if (cleanType === "receipt" && (!isPaid || (amountPaidNum <= 0 && totalTargetNum > 0))) {
     return res.status(400).json({
       message: `Cannot generate receipt for unpaid repair ticket #${ticket.ticket_number}.`,
       error: "ticket_unpaid",
@@ -129,7 +131,7 @@ export async function generateRepairDocument(
       },
       payment_status: isPaid ? "paid" : "unpaid",
       payment_reference: payRef,
-      total: cleanType === "receipt" ? (amountPaidNum > 0 ? amountPaidNum : Number(ticket.total_actual || ticket.total_estimate || 0)) : Number(ticket.total_actual || ticket.total_estimate || 0),
+      total: cleanType === "receipt" ? (amountPaidNum > 0 ? amountPaidNum : totalTargetNum) : totalTargetNum,
       amount_paid: amountPaidNum,
       force_source: "zoho",
       auto_send: false,

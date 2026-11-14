@@ -1,5 +1,6 @@
 import { MedusaRequest, MedusaResponse } from "@medusajs/framework/http";
 import { updateRepairStatusWorkflow } from "../../../../../workflows/update-repair-status-workflow";
+import { sanitizeRepairTicket } from "../../../../../utils/sanitize-ticket";
 
 // POST /admin/repairs/:id/status - Update repair status
 export async function POST(
@@ -31,6 +32,6 @@ export async function POST(
   });
 
   res.json({
-    repair_ticket: result.repairTicket,
+    repair_ticket: sanitizeRepairTicket(result.repairTicket),
   });
 }

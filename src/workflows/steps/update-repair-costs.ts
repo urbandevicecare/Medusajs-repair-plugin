@@ -1,6 +1,7 @@
 import { createStep, StepResponse } from "@medusajs/framework/workflows-sdk";
 import { REPAIR_MODULE } from "../../modules/repair";
 import RepairModuleService from "../../modules/repair/service";
+import { parseNumberField } from "../../utils/sanitize-ticket";
 
 type UpdateRepairCostsInput = {
   repair_ticket_id: string;
@@ -27,11 +28,11 @@ export const updateRepairCostsStep = createStep(
     if (input.apply_tax !== undefined) {
       updateData.apply_tax = input.apply_tax;
       // If we are JUST updating tax, we must recalculate total based on current parts/labor
-      let newTotalEst = (input.parts_estimate ?? Number(currentTicket.parts_estimate || 0)) + (input.labor_estimate ?? Number(currentTicket.labor_estimate || 0));
+      let newTotalEst = (input.parts_estimate ?? parseNumberField(currentTicket.parts_estimate)) + (input.labor_estimate ?? parseNumberField(currentTicket.labor_estimate));
       if (hasTax) newTotalEst = newTotalEst * 1.16;
       updateData.total_estimate = newTotalEst;
       
-      let newTotalAct = (input.parts_actual ?? Number(currentTicket.parts_actual || 0)) + (input.labor_actual ?? Number(currentTicket.labor_actual || 0));
+      let newTotalAct = (input.parts_actual ?? parseNumberField(currentTicket.parts_actual)) + (input.labor_actual ?? parseNumberField(currentTicket.labor_actual));
       if (hasTax) newTotalAct = newTotalAct * 1.16;
       updateData.total_actual = newTotalAct;
     }
@@ -39,7 +40,7 @@ export const updateRepairCostsStep = createStep(
     if (input.parts_estimate !== undefined || input.labor_estimate !== undefined) {
       if (input.parts_estimate !== undefined) updateData.parts_estimate = input.parts_estimate;
       if (input.labor_estimate !== undefined) updateData.labor_estimate = input.labor_estimate;
-      let newTotal = (input.parts_estimate ?? Number(currentTicket.parts_estimate || 0)) + (input.labor_estimate ?? Number(currentTicket.labor_estimate || 0));
+      let newTotal = (input.parts_estimate ?? parseNumberField(currentTicket.parts_estimate)) + (input.labor_estimate ?? parseNumberField(currentTicket.labor_estimate));
       if (hasTax) {
         newTotal = newTotal * 1.16;
       }
@@ -49,7 +50,7 @@ export const updateRepairCostsStep = createStep(
     if (input.parts_actual !== undefined || input.labor_actual !== undefined) {
       if (input.parts_actual !== undefined) updateData.parts_actual = input.parts_actual;
       if (input.labor_actual !== undefined) updateData.labor_actual = input.labor_actual;
-      let newTotal = (input.parts_actual ?? Number(currentTicket.parts_actual || 0)) + (input.labor_actual ?? Number(currentTicket.labor_actual || 0));
+      let newTotal = (input.parts_actual ?? parseNumberField(currentTicket.parts_actual)) + (input.labor_actual ?? parseNumberField(currentTicket.labor_actual));
       if (hasTax) {
         newTotal = newTotal * 1.16;
       }

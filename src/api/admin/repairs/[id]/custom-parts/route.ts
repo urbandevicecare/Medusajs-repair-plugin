@@ -2,6 +2,7 @@ import { MedusaRequest, MedusaResponse } from "@medusajs/framework/http";
 import { ContainerRegistrationKeys } from "@medusajs/framework/utils";
 import RepairModuleService from "../../../../../modules/repair/service";
 import { REPAIR_MODULE } from "../../../../../modules/repair";
+import { sanitizeRepairTicket } from "../../../../../utils/sanitize-ticket";
 
 // POST /admin/repairs/:id/custom-parts - Add a custom part
 export async function POST(
@@ -57,5 +58,5 @@ export async function POST(
     total_estimate: newTotalEstimate,
   });
 
-  res.json({ repair_ticket: updatedTicket });
+  res.json({ repair_ticket: sanitizeRepairTicket(updatedTicket) });
 }
