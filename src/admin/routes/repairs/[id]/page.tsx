@@ -18,6 +18,7 @@ import {
   ChatBubbleLeftRight,
   Trash,
   BellAlert,
+  ExclamationCircle,
 } from "@medusajs/icons";
 import { useStoreCurrency } from "../../../lib/use-store-currency";
 import { useNavigate } from "react-router-dom";
@@ -34,6 +35,7 @@ type RepairTicket = {
   id: string;
   ticket_number: string;
   status: string;
+  documents_plugin_installed?: boolean;
   technician_id?: string;
   technician_name?: string;
   issue_description: string;
@@ -137,23 +139,72 @@ const RepairDetailPage = () => {
   const [refundReason, setRefundReason] = useState("");
   const [isSubmittingRefund, setIsSubmittingRefund] = useState(false);
 
-  useEffect(() => {
-    const delayDebounceFn = setTimeout(() => {
-      if (!technicianSearch) {
-        setTechnicianOptions([]);
-        return;
+  // Delete ticket state
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [isDeletingTicket, setIsDeletingTicket] = useState(false);
+
+  const handleDeleteTicket = async () => {
+    setIsDeletingTicket(true);
+    try {
+      const res = await fetch(`/admin/repairs/${id}`, {
+        method: "DELETE",
+        credentials: "include",
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.message || "Failed to delete repair ticket");
       }
+      toast.success("Repair ticket deleted successfully");
+      navigate("/repairs");
+    } catch (err: any) {
+      toast.error(err.message || "Failed to delete ticket");
+      setIsDeletingTicket(false);
+      setDeleteDialogOpen(false);
+    }
+  };
+
+  const [allTechnicians, setAllTechnicians] = useState<any[]>([]);
+
+  // Pre-load official technicians
+  const loadOfficialTechnicians = () => {
+    fetch("/admin/repairs/technicians", { credentials: "include" })
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.technicians && Array.isArray(data.technicians)) {
+          setAllTechnicians(data.technicians);
+          setTechnicianOptions(data.technicians);
+        }
+      })
+      .catch((err) => console.error("Failed to load technicians", err));
+  };
+
+  useEffect(() => {
+    loadOfficialTechnicians();
+  }, []);
+
+  useEffect(() => {
+    if (!technicianSearch.trim()) {
+      setTechnicianOptions(allTechnicians);
+      return;
+    }
+    const delayDebounceFn = setTimeout(() => {
       Promise.all([
-        fetch(`/admin/users?q=${technicianSearch}`, { credentials: "include" }).then((res) => res.json()),
-        fetch(`/admin/customers?q=${technicianSearch}`, { credentials: "include" }).then((res) => res.json())
+        fetch(`/admin/users?q=${technicianSearch}`, { credentials: "include" }).then((res) => res.json()).catch(() => ({})),
+        fetch(`/admin/customers?q=${technicianSearch}`, { credentials: "include" }).then((res) => res.json()).catch(() => ({}))
       ]).then(([usersData, customersData]) => {
         const admins = (usersData.users || []).map((u: any) => ({...u, type: 'Admin'}));
         const customers = (customersData.customers || []).map((c: any) => ({...c, type: 'Customer'}));
-        setTechnicianOptions([...admins, ...customers]);
+        const localMatches = allTechnicians.filter(t => 
+          (t.name || "").toLowerCase().includes(technicianSearch.toLowerCase()) ||
+          (t.email || "").toLowerCase().includes(technicianSearch.toLowerCase())
+        );
+        const combined = [...localMatches, ...admins, ...customers];
+        const unique = Array.from(new Map(combined.map(item => [item.id, item])).values());
+        setTechnicianOptions(unique);
       }).catch(err => console.error("Search failed", err));
     }, 300);
     return () => clearTimeout(delayDebounceFn);
-  }, [technicianSearch]);
+  }, [technicianSearch, allTechnicians]);
 
   const parseNum = (val: any) => {
     if (val === null || val === undefined) return 0;
@@ -584,6 +635,15 @@ const RepairDetailPage = () => {
     }
   };
 
+  const handleDocumentClick = (e: React.MouseEvent, type: string) => {
+    if (ticket && ticket.documents_plugin_installed === false) {
+      e.preventDefault();
+      toast.error(`Documents Plugin is required to generate ${type}. Please install medusajs-documents-plugin.`);
+      alert(`Documents Plugin (medusajs-documents-plugin) is not installed.\n\nIt is required to create and download repair ${type} documents and sync with Zoho Books.\nPlease install and enable medusajs-documents-plugin.`);
+      return;
+    }
+  };
+
   const handleUpdateCosts = async (overrides?: { newStatus?: string; technicianName?: string; technicianId?: string; laborCost?: string; etc?: string }) => {
     try {
       const promises = [];
@@ -729,27 +789,29 @@ const RepairDetailPage = () => {
     <div className="space-y-6">
       <Toaster />
 
+      {ticket.documents_plugin_installed === false && (
+        <div className="p-4 rounded-lg bg-amber-50 border border-amber-200 flex items-start gap-3 text-amber-900 shadow-sm">
+          <div className="p-1 rounded bg-amber-100 text-amber-700 mt-0.5">
+            <ExclamationCircle className="w-5 h-5 flex-shrink-0" />
+          </div>
+          <div className="flex-1 text-sm">
+            <p className="font-semibold text-amber-950">Documents Plugin Required</p>
+            <p className="text-amber-800 mt-0.5">
+              The Medusa Documents Plugin (<code>medusajs-documents-plugin</code>) is not installed. It is required to create and download repair invoices, estimates, receipts, and sync with Zoho Books.
+            </p>
+          </div>
+        </div>
+      )}
+
       {/* Header */}
       <Container>
         <div className="flex items-start justify-between">
           <div>
-            <div className="flex items-center gap-3">
+            <div className="flex items-center gap-2">
               <Heading level="h1">{ticket.ticket_number}</Heading>
-              <Badge color={getStatusColor(ticket.status)}>
-                {ticket.status.replace("_", " ")}
+              <Badge color={getStatusColor(ticket.status)} className="capitalize">
+                {ticket.status.replace(/_/g, " ")}
               </Badge>
-              {(ticket.completed_at || ticket.status === "completed" || ticket.metadata?.is_completed) && (
-                <Badge color="green">Completed</Badge>
-              )}
-              {(ticket.collected_at || ticket.status === "collected" || ticket.metadata?.is_collected) && (
-                <Badge color="blue">Collected</Badge>
-              )}
-              {(ticket.status === "cancelled" || ticket.metadata?.is_cancelled) && (
-                <Badge color="red">Cancelled</Badge>
-              )}
-              {ticket.technician_name && (
-                <Badge color="purple">{ticket.technician_name}</Badge>
-              )}
               {(() => {
                 const pStatus = getPaymentStatusInfo(ticket);
                 if (pStatus.label === "REFUNDED") {
@@ -773,22 +835,42 @@ const RepairDetailPage = () => {
           </div>
           <div className="flex flex-wrap items-center justify-end gap-x-5 gap-y-2">
             {(ticket?.available_documents?.includes("job_card") || Boolean(ticket?.metadata?.job_card_id || ticket?.metadata?.job_card_created || (ticket?.metadata?.last_document_generated === "job_card" && ticket?.metadata?.pdf_url))) && (
-              <a href={`/admin/repairs/${id}/document?type=job_card`} target="_blank" className="text-[11px] uppercase tracking-wider font-semibold text-ui-fg-subtle hover:text-ui-fg-base transition-colors">
+              <a 
+                href={`/admin/repairs/${id}/document?type=job_card`} 
+                target="_blank" 
+                onClick={(e) => handleDocumentClick(e, "Job Card")}
+                className="text-[11px] uppercase tracking-wider font-semibold text-ui-fg-subtle hover:text-ui-fg-base transition-colors"
+              >
                 Job Card
               </a>
             )}
             {(ticket?.available_documents?.includes("quote") || ticket?.available_documents?.includes("estimate") || Boolean(ticket?.metadata?.zoho_estimate_id)) && (
-              <a href={`/admin/repairs/${id}/document?type=quote`} target="_blank" className="text-[11px] uppercase tracking-wider font-semibold text-ui-fg-subtle hover:text-ui-fg-base transition-colors">
+              <a 
+                href={`/admin/repairs/${id}/document?type=quote`} 
+                target="_blank" 
+                onClick={(e) => handleDocumentClick(e, "Quote / Estimate")}
+                className="text-[11px] uppercase tracking-wider font-semibold text-ui-fg-subtle hover:text-ui-fg-base transition-colors"
+              >
                 Quote
               </a>
             )}
             {(ticket?.available_documents?.includes("invoice") || Boolean(ticket?.metadata?.zoho_invoice_id)) && (
-              <a href={`/admin/repairs/${id}/document?type=invoice`} target="_blank" className="text-[11px] uppercase tracking-wider font-semibold text-ui-fg-subtle hover:text-ui-fg-base transition-colors">
+              <a 
+                href={`/admin/repairs/${id}/document?type=invoice`} 
+                target="_blank" 
+                onClick={(e) => handleDocumentClick(e, "Invoice")}
+                className="text-[11px] uppercase tracking-wider font-semibold text-ui-fg-subtle hover:text-ui-fg-base transition-colors"
+              >
                 Invoice
               </a>
             )}
             {(Number(ticket.amount_paid || 0) > 0 && (ticket?.available_documents?.includes("receipt") || Boolean(ticket?.metadata?.zoho_payment_id) || Boolean((ticket?.payment_status === "captured" || ticket?.payment_status === "paid") && ticket?.metadata?.zoho_invoice_id))) && (
-              <a href={`/admin/repairs/${id}/document?type=receipt`} target="_blank" className="text-[11px] uppercase tracking-wider font-semibold text-ui-fg-subtle hover:text-ui-fg-base transition-colors">
+              <a 
+                href={`/admin/repairs/${id}/document?type=receipt`} 
+                target="_blank" 
+                onClick={(e) => handleDocumentClick(e, "Receipt")}
+                className="text-[11px] uppercase tracking-wider font-semibold text-ui-fg-subtle hover:text-ui-fg-base transition-colors"
+              >
                 Receipt
               </a>
             )}
@@ -806,6 +888,13 @@ const RepairDetailPage = () => {
               className="text-[11px] uppercase tracking-wider font-semibold text-ui-fg-interactive hover:text-ui-fg-interactive-hover transition-colors flex items-center gap-1 disabled:opacity-50"
             >
               <BellAlert className="w-3 h-3" /> Reminder
+            </button>
+            <button 
+              onClick={() => setDeleteDialogOpen(true)}
+              disabled={isDeletingTicket}
+              className="text-[11px] uppercase tracking-wider font-semibold text-red-600 hover:text-red-700 transition-colors flex items-center gap-1 disabled:opacity-50 pl-2 border-l border-ui-border-base ml-2"
+            >
+              <Trash className="w-3 h-3" /> Delete
             </button>
             <button onClick={() => navigate('/repairs')} className="text-[11px] uppercase tracking-wider font-semibold text-ui-fg-subtle hover:text-ui-fg-base transition-colors pl-2 border-l border-ui-border-base ml-2">
               Back
@@ -1709,6 +1798,46 @@ const RepairDetailPage = () => {
                   isLoading={isSubmittingRefund}
                 >
                   Confirm Refund
+                </Button>
+              </div>
+            </div>
+          </FocusModal.Body>
+        </FocusModal.Content>
+      </FocusModal>
+
+      {/* Delete Ticket Confirmation Modal */}
+      <FocusModal open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+        <FocusModal.Content>
+          <FocusModal.Header>
+            <div className="flex items-center gap-2 text-red-600 font-semibold">
+              <Trash className="w-4 h-4" />
+              <span>Delete Repair Ticket</span>
+            </div>
+          </FocusModal.Header>
+          <FocusModal.Body className="p-6 max-w-lg mx-auto w-full">
+            <div className="space-y-4">
+              <Heading level="h2">Permanently Delete Ticket</Heading>
+              <Text className="text-sm text-ui-fg-subtle">
+                Are you sure you want to delete repair ticket <strong>#{ticket?.ticket_number}</strong>?
+              </Text>
+              <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-xs text-red-800 leading-relaxed">
+                ⚠️ <strong>Warning:</strong> This action is permanent and cannot be undone. All ticket records, customer updates, internal notes, media, and associated local documents will be removed.
+              </div>
+
+              <div className="flex justify-end gap-2 pt-4 border-t">
+                <Button
+                  variant="secondary"
+                  onClick={() => setDeleteDialogOpen(false)}
+                  disabled={isDeletingTicket}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  variant="danger"
+                  onClick={handleDeleteTicket}
+                  isLoading={isDeletingTicket}
+                >
+                  Permanently Delete
                 </Button>
               </div>
             </div>

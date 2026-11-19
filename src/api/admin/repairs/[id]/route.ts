@@ -4,6 +4,8 @@ import {
   ContainerRegistrationKeys,
 } from "@medusajs/framework/utils";
 import { sanitizeRepairTicket } from "../../../../utils/sanitize-ticket";
+import { REPAIR_MODULE } from "../../../../modules/repair";
+import RepairModuleService from "../../../../modules/repair/service";
 
 // GET /admin/repairs/:id - Get single repair ticket
 export async function GET(
@@ -71,15 +73,19 @@ export async function GET(
   }
 
   let availableDocuments: string[] = [];
+  let documentsPluginInstalled = false;
   try {
     const docService: any = req.scope.resolve("documents", { allowUnregistered: true });
-    if (docService && typeof docService.listDocumentRecords === "function") {
-      const records = await docService.listDocumentRecords({ repair_ticket_id: req.params.id }).catch(() => []);
-      if (Array.isArray(records)) {
-        const isTicketPaid = (sanitizedTicket.amount_paid > 0 || sanitizedTicket.total_estimate === 0) && (sanitizedTicket.payment_status === "captured" || sanitizedTicket.payment_status === "paid");
-        availableDocuments = records
-          .filter((r: any) => isTicketPaid || r.type !== "receipt")
-          .map((r: any) => r.type === "estimate" ? "quote" : r.type);
+    if (docService) {
+      documentsPluginInstalled = true;
+      if (typeof docService.listDocumentRecords === "function") {
+        const records = await docService.listDocumentRecords({ repair_ticket_id: req.params.id }).catch(() => []);
+        if (Array.isArray(records)) {
+          const isTicketPaid = (sanitizedTicket.amount_paid > 0 || sanitizedTicket.total_estimate === 0) && (sanitizedTicket.payment_status === "captured" || sanitizedTicket.payment_status === "paid");
+          availableDocuments = records
+            .filter((r: any) => isTicketPaid || r.type !== "receipt")
+            .map((r: any) => r.type === "estimate" ? "quote" : r.type);
+        }
       }
     }
   } catch (_) {}
@@ -91,6 +97,70 @@ export async function GET(
       customer_phone: customerInfo?.phone || "",
       parts,
       available_documents: availableDocuments,
+      documents_plugin_installed: documentsPluginInstalled,
     },
+    documents_plugin_installed: documentsPluginInstalled,
   });
 }
+
+// DELETE /admin/repairs/:id - Delete repair ticket and cascade cleanup
+export async function DELETE(
+  req: MedusaRequest<{ id: string }>,
+  res: MedusaResponse,
+) {
+  const { id } = req.params;
+  const repairService: RepairModuleService = req.scope.resolve(REPAIR_MODULE);
+  const logger: any = req.scope.resolve("logger", { allowUnregistered: true });
+
+  const tickets = await repairService.listRepairTickets({ id });
+  if (!tickets || tickets.length === 0) {
+    throw new MedusaError(
+      MedusaError.Types.NOT_FOUND,
+      `Repair ticket with id ${id} not found`,
+    );
+  }
+
+  // 1. Delegate document cleanup to medusajs-documents-plugin
+  try {
+    const docService: any = req.scope.resolve("documents", { allowUnregistered: true });
+    if (docService && typeof docService.deleteDocumentsForRepairTicket === "function") {
+      await docService.deleteDocumentsForRepairTicket(id, req.scope);
+    }
+  } catch (docErr: any) {
+    logger?.warn?.(`[deleteRepairTicket] Failed to delete linked documents: ${docErr.message}`);
+  }
+
+  // 2. Delete linked notes, media, updates, links
+  try {
+    const notes = await repairService.listRepairNotes({ repair_ticket_id: id }).catch(() => []);
+    if (notes.length > 0) {
+      await repairService.deleteRepairNotes(notes.map((n: any) => n.id));
+    }
+  } catch (_) {}
+
+  try {
+    const media = await repairService.listRepairMedias({ repair_ticket_id: id }).catch(() => []);
+    if (media.length > 0) {
+      await repairService.deleteRepairMedias(media.map((m: any) => m.id));
+    }
+  } catch (_) {}
+
+  try {
+    const updates = await repairService.listRepairUpdates({ repair_ticket_id: id }).catch(() => []);
+    if (updates.length > 0) {
+      await repairService.deleteRepairUpdates(updates.map((u: any) => u.id));
+    }
+  } catch (_) {}
+
+  // 3. Delete the ticket itself
+  await repairService.deleteRepairTickets(id);
+
+  logger?.info?.(`[deleteRepairTicket] Successfully deleted repair ticket ${id}`);
+
+  res.json({
+    id,
+    object: "repair_ticket",
+    deleted: true,
+  });
+}
+

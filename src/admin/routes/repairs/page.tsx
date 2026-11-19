@@ -16,7 +16,19 @@ import {
   Switch,
 } from "@medusajs/ui";
 import { useEffect, useState, useRef, useCallback, useMemo } from "react";
-import { Wrench, DocumentText, ArrowPath, ArrowDownTray, Envelope, Sparkles, ChartBar } from "@medusajs/icons";
+import {
+  Wrench,
+  DocumentText,
+  ArrowPath,
+  ArrowDownTray,
+  Envelope,
+  Sparkles,
+  ChartBar,
+  ExclamationCircle,
+  InformationCircle,
+  Trash,
+  Plus,
+} from "@medusajs/icons";
 import { useStoreCurrency } from "../../lib/use-store-currency";
 import { useNavigate } from "react-router-dom";
 import { RepairReportsTab } from "./components/repair-reports-tab";
@@ -73,6 +85,81 @@ const RepairsPage = () => {
     whatsapp_body_template: "",
   });
 
+  const [documentsPluginInstalled, setDocumentsPluginInstalled] = useState<boolean | null>(null);
+  const [technicians, setTechnicians] = useState<any[]>([]);
+  const [loadingTechnicians, setLoadingTechnicians] = useState(false);
+  const [addTechnicianModalOpen, setAddTechnicianModalOpen] = useState(false);
+  const [newTechForm, setNewTechForm] = useState({
+    first_name: "",
+    last_name: "",
+    email: "",
+    phone: "",
+    customer_id: "",
+  });
+  const [savingTech, setSavingTech] = useState(false);
+  const [deletingTechId, setDeletingTechId] = useState<string | null>(null);
+
+  const loadTechnicians = async () => {
+    setLoadingTechnicians(true);
+    try {
+      const res = await fetch("/admin/repairs/technicians", { credentials: "include" });
+      const data = await res.json();
+      if (data.technicians && Array.isArray(data.technicians)) {
+        setTechnicians(data.technicians);
+      }
+    } catch (err) {
+      console.error("Failed to load technicians", err);
+    } finally {
+      setLoadingTechnicians(false);
+    }
+  };
+
+  const handleAddTechnician = async () => {
+    if (!newTechForm.first_name && !newTechForm.customer_id) {
+      alert("Please provide at least a first name or select an existing customer.");
+      return;
+    }
+    if (!newTechForm.customer_id && !newTechForm.email) {
+      alert("Please provide an email address.");
+      return;
+    }
+    setSavingTech(true);
+    try {
+      const res = await fetch("/admin/repairs/technicians", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify(newTechForm),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.message || "Failed to add technician");
+      setAddTechnicianModalOpen(false);
+      setNewTechForm({ first_name: "", last_name: "", email: "", phone: "", customer_id: "" });
+      await loadTechnicians();
+    } catch (err: any) {
+      alert(err.message || "Failed to add technician");
+    } finally {
+      setSavingTech(false);
+    }
+  };
+
+  const handleRemoveTechnician = async (techId: string, name: string) => {
+    if (!confirm(`Are you sure you want to remove ${name} from repair technicians?`)) return;
+    setDeletingTechId(techId);
+    try {
+      const res = await fetch(`/admin/repairs/technicians?id=${techId}`, {
+        method: "DELETE",
+        credentials: "include",
+      });
+      if (!res.ok) throw new Error("Failed to remove technician");
+      await loadTechnicians();
+    } catch (err: any) {
+      alert(err.message || "Failed to remove technician");
+    } finally {
+      setDeletingTechId(null);
+    }
+  };
+
   const loadSettings = () => {
     fetch("/admin/repairs/settings", { credentials: "include" })
       .then((res) => res.json())
@@ -94,6 +181,9 @@ const RepairsPage = () => {
             sms_body_template: data.settings.sms_body_template || "",
             whatsapp_body_template: data.settings.whatsapp_body_template || "",
           });
+        }
+        if (typeof data.documents_plugin_installed === "boolean") {
+          setDocumentsPluginInstalled(data.documents_plugin_installed);
         }
       })
       .catch((err) => console.error(err));
@@ -139,6 +229,8 @@ const RepairsPage = () => {
   const [newTicket, setNewTicket] = useState({
     customer_id: "",
     issue_description: "",
+    technician_id: "",
+    technician_name: "",
     terms_accepted: false,
     data_wiped_consent: false,
   });
@@ -253,6 +345,7 @@ const RepairsPage = () => {
     loadTickets(true, "all");
     loadCustomers();
     loadSettings();
+    loadTechnicians();
   }, []);
 
   useEffect(() => {
@@ -293,6 +386,10 @@ const RepairsPage = () => {
     setAccessories(accessories.filter((a) => a !== acc));
 
   const handleCreateTicket = async () => {
+    if (!newTicket.customer_id || !newTicket.customer_id.trim()) {
+      alert("Please select or create a customer. Every repair ticket must have a customer attached.");
+      return;
+    }
     if (!newTicket.terms_accepted) {
       alert("Customer must accept the Repair Terms & Conditions to proceed.");
       return;
@@ -308,17 +405,19 @@ const RepairsPage = () => {
             serial_number: newDevice.serial_number,
             model_name: newDevice.model_name,
             brand: newDevice.brand,
-            customer_id: newDevice.customer_id || undefined,
+            customer_id: newTicket.customer_id,
             imei: newDevice.imei || undefined,
             condition: newDevice.condition || undefined,
           },
           ticket: {
-            customer_id: newTicket.customer_id || undefined,
+            customer_id: newTicket.customer_id,
             issue_description: newTicket.issue_description,
             accessories:
               accessories.length > 0 ? accessories.join(", ") : undefined,
             terms_accepted: newTicket.terms_accepted,
             data_wiped_consent: newTicket.data_wiped_consent,
+            technician_name: newTicket.technician_name || undefined,
+            technician_id: newTicket.technician_id || undefined,
           },
         }),
       });
@@ -341,6 +440,8 @@ const RepairsPage = () => {
       setNewTicket({
         customer_id: "",
         issue_description: "",
+        technician_id: "",
+        technician_name: "",
         terms_accepted: false,
         data_wiped_consent: false,
       });
@@ -513,6 +614,20 @@ const RepairsPage = () => {
           Repair Reports
         </button>
       </div>
+
+      {documentsPluginInstalled === false && (
+        <div className="mx-6 mt-6 p-4 rounded-lg bg-amber-50 border border-amber-200 flex items-start gap-3 text-amber-900 shadow-sm">
+          <div className="p-1 rounded bg-amber-100 text-amber-700 mt-0.5">
+            <ExclamationCircle className="w-5 h-5 flex-shrink-0" />
+          </div>
+          <div className="flex-1 text-sm">
+            <p className="font-semibold text-amber-950">Documents Plugin Required</p>
+            <p className="text-amber-800 mt-0.5">
+              The Medusa Documents Plugin (<code>medusajs-documents-plugin</code>) is not installed. It is required to create repair invoices, estimates, receipts, and sync with Zoho Books.
+            </p>
+          </div>
+        </div>
+      )}
       
       {activeTab === "tickets" && (
         <div className="p-6">
@@ -544,6 +659,7 @@ const RepairsPage = () => {
                 variant="primary"
                 onClick={handleCreateTicket}
                 isLoading={isCreating}
+                disabled={!newTicket.customer_id || !newTicket.terms_accepted}
               >
                 Save Ticket
               </Button>
@@ -880,6 +996,43 @@ const RepairsPage = () => {
                         placeholder="Type and press comma..."
                       />
                     </div>
+
+                    <div className="flex flex-col gap-y-2">
+                      <Label htmlFor="technician_select">
+                        Assigned Technician (Optional)
+                      </Label>
+                      <Select
+                        value={newTicket.technician_id || "none"}
+                        onValueChange={(val) => {
+                          if (val === "none") {
+                            setNewTicket({
+                              ...newTicket,
+                              technician_id: "",
+                              technician_name: "",
+                            });
+                          } else {
+                            const tech = technicians.find((t) => t.id === val);
+                            setNewTicket({
+                              ...newTicket,
+                              technician_id: val,
+                              technician_name: tech?.name || "",
+                            });
+                          }
+                        }}
+                      >
+                        <Select.Trigger id="technician_select">
+                          <Select.Value placeholder="Select Technician..." />
+                        </Select.Trigger>
+                        <Select.Content>
+                          <Select.Item value="none">Unassigned</Select.Item>
+                          {technicians.map((tech) => (
+                            <Select.Item key={tech.id} value={tech.id}>
+                              {tech.name} {tech.email ? `(${tech.email})` : ""}
+                            </Select.Item>
+                          ))}
+                        </Select.Content>
+                      </Select>
+                    </div>
                   </div>
                 </div>
 
@@ -1002,29 +1155,14 @@ const RepairsPage = () => {
                   </Text>
                 </Table.Cell>
                 <Table.Cell>
-                  <div className="flex flex-wrap gap-1.5 items-center">
-                    <Badge color={getStatusColor(ticket.status)} size="small">
-                      {ticket.status.replace("_", " ")}
+                  <div className="flex items-center gap-1.5 flex-nowrap">
+                    <Badge color={getStatusColor(ticket.status)} size="small" className="capitalize whitespace-nowrap">
+                      {ticket.status.replace(/_/g, " ")}
                     </Badge>
-                    {(ticket.completed_at || ticket.status === "completed" || ticket.metadata?.is_completed) && (
-                      <Badge color="green" size="small">
-                        Completed
-                      </Badge>
-                    )}
-                    {(ticket.collected_at || ticket.status === "collected" || ticket.metadata?.is_collected) && (
-                      <Badge color="blue" size="small">
-                        Collected
-                      </Badge>
-                    )}
-                    {(ticket.status === "cancelled" || ticket.metadata?.is_cancelled) && (
-                      <Badge color="red" size="small">
-                        Cancelled
-                      </Badge>
-                    )}
                     {(() => {
                       const pStatus = getTicketPaymentBadge(ticket);
                       return (
-                        <Badge color={pStatus.color} size="small">
+                        <Badge color={pStatus.color} size="small" className="whitespace-nowrap">
                           {pStatus.label}
                         </Badge>
                       );
@@ -1350,10 +1488,46 @@ const RepairsPage = () => {
           </div>
 
           <div className="flex flex-col gap-y-6">
-            <Heading level="h2">Zoho Books Integration</Heading>
+            <Heading level="h2">Zoho Books & Document Generation</Heading>
             <Text className="text-ui-fg-subtle text-xs">
               Configure Zoho Books to sync Repair Tickets as Estimates and Invoices.
             </Text>
+
+            {documentsPluginInstalled === false && (
+              <div className="p-4 rounded-lg bg-amber-50 border border-amber-200 flex items-start gap-3 text-amber-900 shadow-sm">
+                <div className="p-1 rounded bg-amber-100 text-amber-700 mt-0.5">
+                  <ExclamationCircle className="w-5 h-5 flex-shrink-0" />
+                </div>
+                <div className="flex-1 text-sm">
+                  <p className="font-semibold text-amber-950">Documents Plugin Required for Invoices</p>
+                  <p className="text-amber-800 mt-0.5">
+                    The Medusa Documents Plugin (<code>medusajs-documents-plugin</code>) is not installed. Zoho Books synchronization, invoice numbering, and document generation (Invoices, Estimates, Receipts, Job Cards) require the Documents plugin to be installed and active in your Medusa backend.
+                  </p>
+                </div>
+              </div>
+            )}
+
+            {documentsPluginInstalled === true && (
+              <div className="p-4 rounded-lg bg-emerald-50 border border-emerald-200 flex items-start gap-3 text-emerald-900 shadow-sm">
+                <div className="p-1 rounded bg-emerald-100 text-emerald-700 mt-0.5">
+                  <InformationCircle className="w-5 h-5 flex-shrink-0" />
+                </div>
+                <div className="flex-1 text-sm">
+                  <p className="font-semibold text-emerald-950">Zoho Books & Invoicing Managed by Documents Plugin</p>
+                  <p className="text-emerald-800 mt-0.5">
+                    Official invoice generation, PDF templates, and Zoho Books synchronization are actively powered by <code>medusajs-documents-plugin</code>. You can manage templates, invoice sequences, and Zoho credentials directly under Documents Settings.
+                  </p>
+                  <div className="mt-2">
+                    <a 
+                      href="/documents/settings" 
+                      className="inline-flex items-center text-xs font-semibold text-emerald-800 hover:text-emerald-950 underline"
+                    >
+                      Open Documents Settings &rarr;
+                    </a>
+                  </div>
+                </div>
+              </div>
+            )}
             
             <div className="flex flex-col gap-y-6 mt-2">
               <div className="flex items-center justify-between">
@@ -1430,6 +1604,13 @@ const RepairsPage = () => {
             <Text className="text-ui-fg-subtle text-xs">
               Configure Paystack to generate instant online payment links for repairs.
             </Text>
+
+            <div className="p-3.5 rounded-lg bg-ui-bg-subtle border border-ui-border-base text-xs text-ui-fg-subtle">
+              <p className="font-semibold text-ui-fg-base mb-1">How Paystack Online Payments Work:</p>
+              <p className="leading-relaxed">
+                When enabled with your Paystack secret key, repair tickets automatically generate secure payment links for customers. These links are automatically shortened and included in customer SMS notifications and QR codes on printed invoices. When a customer completes checkout, Medusa automatically verifies payment and marks the ticket as paid.
+              </p>
+            </div>
             
             <div className="flex flex-col gap-y-6 mt-2">
               <div className="flex items-center justify-between">
@@ -1464,6 +1645,77 @@ const RepairsPage = () => {
             </div>
           </div>
 
+          <div className="border-b border-ui-border-base my-6" />
+
+          {/* TECHNICIANS MANAGEMENT */}
+          <div className="flex flex-col gap-y-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <Heading level="h2">Repair Technicians</Heading>
+                <Text className="text-ui-fg-subtle text-xs">
+                  Manage workshop technicians assigned to diagnose, repair, and sign off on repair tickets.
+                </Text>
+              </div>
+              <Button size="small" variant="secondary" onClick={() => setAddTechnicianModalOpen(true)}>
+                <Plus className="w-3.5 h-3.5 mr-1" /> Add Technician
+              </Button>
+            </div>
+
+            <div className="border border-ui-border-base rounded-lg overflow-hidden bg-ui-bg-base">
+              <table className="w-full text-left text-sm">
+                <thead className="bg-ui-bg-subtle border-b border-ui-border-base text-xs font-medium text-ui-fg-muted uppercase tracking-wider">
+                  <tr>
+                    <th className="px-4 py-3">Name</th>
+                    <th className="px-4 py-3">Email</th>
+                    <th className="px-4 py-3">Phone</th>
+                    <th className="px-4 py-3">Role</th>
+                    <th className="px-4 py-3 text-right">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-ui-border-base">
+                  {loadingTechnicians ? (
+                    <tr>
+                      <td colSpan={5} className="px-4 py-6 text-center text-ui-fg-muted text-xs">
+                        Loading technicians...
+                      </td>
+                    </tr>
+                  ) : technicians.length === 0 ? (
+                    <tr>
+                      <td colSpan={5} className="px-4 py-6 text-center text-ui-fg-muted text-xs">
+                        No technicians configured. Click "+ Add Technician" to add one.
+                      </td>
+                    </tr>
+                  ) : (
+                    technicians.map((tech) => (
+                      <tr key={tech.id} className="hover:bg-ui-bg-subtle-hover transition-colors">
+                        <td className="px-4 py-3 font-medium text-ui-fg-base">
+                          {tech.name || `${tech.first_name || ""} ${tech.last_name || ""}`.trim() || "Technician"}
+                        </td>
+                        <td className="px-4 py-3 text-ui-fg-subtle text-xs">{tech.email || "-"}</td>
+                        <td className="px-4 py-3 text-ui-fg-subtle text-xs">{tech.phone || "-"}</td>
+                        <td className="px-4 py-3">
+                          <Badge color="blue" size="small">
+                            Technician
+                          </Badge>
+                        </td>
+                        <td className="px-4 py-3 text-right">
+                          <button
+                            type="button"
+                            disabled={deletingTechId === tech.id}
+                            onClick={() => handleRemoveTechnician(tech.id, tech.name)}
+                            className="text-red-600 hover:text-red-700 text-xs font-medium disabled:opacity-50 inline-flex items-center gap-1"
+                          >
+                            <Trash className="w-3.5 h-3.5" /> Remove
+                          </button>
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
           <div className="flex justify-end mt-4">
             <Button variant="primary" onClick={saveSettings} isLoading={isSaving}>
               Save All Settings
@@ -1471,6 +1723,105 @@ const RepairsPage = () => {
           </div>
         </div>
       )}
+
+      {/* FocusModal to Add Technician */}
+      <FocusModal open={addTechnicianModalOpen} onOpenChange={setAddTechnicianModalOpen}>
+        <FocusModal.Content>
+          <FocusModal.Header>
+            <div className="flex items-center justify-between w-full">
+              <Heading level="h2">Add Repair Technician</Heading>
+              <div className="flex gap-2">
+                <Button variant="secondary" onClick={() => setAddTechnicianModalOpen(false)}>
+                  Cancel
+                </Button>
+                <Button variant="primary" onClick={handleAddTechnician} isLoading={savingTech}>
+                  Save Technician
+                </Button>
+              </div>
+            </div>
+          </FocusModal.Header>
+          <FocusModal.Body className="p-6 max-w-xl mx-auto space-y-6">
+            <Text className="text-ui-fg-subtle text-sm">
+              Select an existing customer to assign the technician role, or enter their details below.
+            </Text>
+
+            <div className="flex flex-col gap-4">
+              <div className="flex flex-col gap-2">
+                <Label>Select Existing Customer (Optional)</Label>
+                <Select
+                  value={newTechForm.customer_id || "none"}
+                  onValueChange={(val) => {
+                    if (val === "none") {
+                      setNewTechForm({ ...newTechForm, customer_id: "" });
+                    } else {
+                      const c = customers.find((cust) => cust.id === val);
+                      if (c) {
+                        setNewTechForm({
+                          customer_id: c.id,
+                          first_name: c.first_name || "",
+                          last_name: c.last_name || "",
+                          email: c.email || "",
+                          phone: c.phone || "",
+                        });
+                      }
+                    }
+                  }}
+                >
+                  <Select.Trigger>
+                    <Select.Value placeholder="Select existing customer" />
+                  </Select.Trigger>
+                  <Select.Content>
+                    <Select.Item value="none">-- Create / Enter New Technician --</Select.Item>
+                    {customers.map((c) => (
+                      <Select.Item key={c.id} value={c.id}>
+                        {c.first_name} {c.last_name} ({c.email})
+                      </Select.Item>
+                    ))}
+                  </Select.Content>
+                </Select>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div className="flex flex-col gap-2">
+                  <Label>First Name *</Label>
+                  <Input
+                    placeholder="e.g. Nelson"
+                    value={newTechForm.first_name}
+                    onChange={(e) => setNewTechForm({ ...newTechForm, first_name: e.target.value })}
+                  />
+                </div>
+                <div className="flex flex-col gap-2">
+                  <Label>Last Name</Label>
+                  <Input
+                    placeholder="e.g. Owalo"
+                    value={newTechForm.last_name}
+                    onChange={(e) => setNewTechForm({ ...newTechForm, last_name: e.target.value })}
+                  />
+                </div>
+              </div>
+
+              <div className="flex flex-col gap-2">
+                <Label>Email Address *</Label>
+                <Input
+                  type="email"
+                  placeholder="technician@urbandevicecare.co.uk"
+                  value={newTechForm.email}
+                  onChange={(e) => setNewTechForm({ ...newTechForm, email: e.target.value })}
+                />
+              </div>
+
+              <div className="flex flex-col gap-2">
+                <Label>Phone Number</Label>
+                <Input
+                  placeholder="+44 7123 456789"
+                  value={newTechForm.phone}
+                  onChange={(e) => setNewTechForm({ ...newTechForm, phone: e.target.value })}
+                />
+              </div>
+            </div>
+          </FocusModal.Body>
+        </FocusModal.Content>
+      </FocusModal>
 
       {activeTab === "reports" && <RepairReportsTab />}
 

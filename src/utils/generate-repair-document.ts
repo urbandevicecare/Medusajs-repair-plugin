@@ -64,9 +64,48 @@ export async function generateRepairDocument(
   const docService: any = req.scope.resolve("documents", { allowUnregistered: true });
   if (!docService) {
     logger?.error?.("[generateRepairDocument] Documents module is not registered. Document generation requires medusajs-documents-plugin.");
+
+    const acceptHeader = (req?.headers && (req.headers["accept"] as string)) || "";
+    if (acceptHeader.includes("text/html")) {
+      res.setHeader("Content-Type", "text/html; charset=utf-8");
+      return res.status(503).send(`
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Documents Plugin Required</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background-color: #f8fafc; color: #1e293b; display: flex; align-items: center; justify-content: center; min-height: 100vh; margin: 0; padding: 20px; box-sizing: border-box; }
+    .card { background: white; border: 1px solid #e2e8f0; border-radius: 12px; max-width: 520px; width: 100%; padding: 32px; box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.05); }
+    .icon { width: 48px; height: 48px; border-radius: 50%; background: #fee2e2; color: #dc2626; display: flex; align-items: center; justify-content: center; margin-bottom: 20px; }
+    h1 { font-size: 20px; font-weight: 600; margin: 0 0 12px 0; color: #0f172a; }
+    p { font-size: 14px; line-height: 1.6; color: #475569; margin: 0 0 16px 0; }
+    .code-box { background: #f1f5f9; padding: 10px 14px; border-radius: 6px; font-family: monospace; font-size: 13px; color: #0f172a; margin-bottom: 20px; word-break: break-all; }
+    .btn { display: inline-block; background: #0f172a; color: white; text-decoration: none; padding: 10px 18px; border-radius: 6px; font-size: 13px; font-weight: 500; cursor: pointer; border: none; }
+    .btn:hover { background: #334155; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="icon">
+      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg>
+    </div>
+    <h1>Documents Plugin Required</h1>
+    <p>Creating and viewing <strong>${cleanType.replace(/_/g, " ").toUpperCase()}</strong> documents requires the <strong>Medusa Documents Plugin</strong> (<code>medusajs-documents-plugin</code>).</p>
+    <p>Please install and enable <code>medusajs-documents-plugin</code> in your Medusa project so that official invoices, quotes, receipts, and Zoho Books integrations can operate.</p>
+    <div class="code-box">yarn add medusajs-documents-plugin</div>
+    <button onclick="window.close()" class="btn">Close Window</button>
+  </div>
+</body>
+</html>
+      `);
+    }
+
     return res.status(500).json({
-      message: "Documents module is required for document generation. No local PDF fallback is enabled.",
+      message: "Documents module (medusajs-documents-plugin) is not installed. It is required to create invoices, estimates, receipts, and job cards.",
       error: "documents_module_not_found",
+      documents_plugin_installed: false,
     });
   }
 

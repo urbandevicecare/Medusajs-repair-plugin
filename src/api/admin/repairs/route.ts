@@ -53,6 +53,18 @@ export async function POST(
 ) {
   const { device, ticket } = req.validatedBody;
 
+  const customerId = ticket?.customer_id || device?.customer_id;
+  if (!customerId || typeof customerId !== "string" || !customerId.trim()) {
+    return res.status(400).json({
+      message: "A customer must be attached to create a repair ticket.",
+      error: "customer_required",
+    });
+  }
+
+  // Ensure customer_id is populated on both device and ticket
+  device.customer_id = customerId;
+  ticket.customer_id = customerId;
+
   const { result } = await createRepairTicketWorkflow(req.scope).run({
     input: {
       device,

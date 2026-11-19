@@ -17,9 +17,10 @@ type CreateRepairTicketWorkflowInput = {
     condition?: string;
   };
   ticket: {
-    customer_id?: string;
+    customer_id: string;
     issue_description: string;
     technician_name?: string;
+    technician_id?: string;
     accessories?: string;
     terms_accepted?: boolean;
     data_wiped_consent?: boolean;
@@ -36,6 +37,7 @@ export const createRepairTicketWorkflow = createWorkflow(
       customer_id: input.ticket.customer_id,
       issue_description: input.ticket.issue_description,
       technician_name: input.ticket.technician_name,
+      technician_id: input.ticket.technician_id,
       accessories: input.ticket.accessories,
       terms_accepted: input.ticket.terms_accepted,
       data_wiped_consent: input.ticket.data_wiped_consent,

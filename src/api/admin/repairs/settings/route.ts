@@ -16,7 +16,13 @@ export async function GET(req: MedusaRequest, res: MedusaResponse) {
     });
   }
 
-  res.json({ settings });
+  const docService: any = req.scope.resolve("documents", { allowUnregistered: true });
+  const documentsPluginInstalled = Boolean(docService);
+
+  res.json({
+    settings,
+    documents_plugin_installed: documentsPluginInstalled,
+  });
 }
 
 // POST /admin/repairs/settings
@@ -83,5 +89,9 @@ export async function POST(
     req.scope.resolve("logger")?.warn?.(`[Repair Settings] Could not sync settings to documents plugin: ${syncErr.message}`);
   }
 
-  res.json({ settings });
+  const docService: any = req.scope.resolve("documents", { allowUnregistered: true });
+  res.json({
+    settings,
+    documents_plugin_installed: Boolean(docService),
+  });
 }
